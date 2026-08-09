@@ -1,225 +1,294 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import PartyCard from './components/PartyCard';
-import PostPartyForm from './components/PostPartyForm';
+import EventMap from './components/EventMap';
+import EventFilter from './components/EventFilter';
+import HostDashboard from './components/HostDashboard';
 import FacecardSection from './components/FacecardSection';
-import partiesData from './data/parties';
-import facecardData from './data/facecardRequests';
+import TicketModal from './components/TicketModal';
+import AttendeeNetworkingModal from './components/AttendeeNetworkingModal';
+import { initialEvents, initialFacecardRequests } from './data/eventsData';
+import { getLocalStore, setLocalStore } from './lib/supabaseClient';
+import { Search, Map, Flame, ShieldAlert, PlusCircle, Sparkles, Compass } from 'lucide-react';
 
 export default function App() {
-  const [parties, setParties] = useState(partiesData);
+  // Persistent state with localStorage fallback
+  const [events, setEvents] = useState(() => getLocalStore('pamp_events', initialEvents));
+  const [facecards, setFacecards] = useState(() => getLocalStore('pamp_facecards', initialFacecardRequests));
   const [rsvps, setRsvps] = useState(new Set());
-  const [facecardRequests, setFacecardRequests] = useState(facecardData);
-  const [activeSection, setActiveSection] = useState('hero');
+
+  // Page Navigation State: 'explore' | 'map' | 'host' | 'facecard'
+  const [activePage, setActivePage] = useState('explore');
+  const [activeCategory, setActiveCategory] = useState('all');
+  const [selectedCity, setSelectedCity] = useState('All Zambia');
   const [searchQuery, setSearchQuery] = useState('');
-  const [vibeFilter, setVibeFilter] = useState('all');
 
-  const heroRef = useRef(null);
-  const browseRef = useRef(null);
-  const postRef = useRef(null);
-  const facecardRef = useRef(null);
+  // Modals
+  const [ticketModalEvent, setTicketModalEvent] = useState(null);
+  const [networkingModalEvent, setNetworkingModalEvent] = useState(null);
 
-  const scrollTo = (id) => {
-    const refs = { hero: heroRef, browse: browseRef, post: postRef, facecard: facecardRef };
-    refs[id]?.current?.scrollIntoView({ behavior: 'smooth' });
-    setActiveSection(id);
-  };
+  // Persist state updates
+  useEffect(() => {
+    setLocalStore('pamp_events', events);
+  }, [events]);
 
-  const handleRSVP = (partyId) => {
-    setRsvps(prev => {
+  useEffect(() => {
+    setLocalStore('pamp_facecards', facecards);
+  }, [facecards]);
+
+  const handleRSVP = (eventId) => {
+    setRsvps((prev) => {
       const next = new Set(prev);
-      if (next.has(partyId)) {
-        next.delete(partyId);
-        setParties(p => p.map(party => party.id === partyId ? { ...party, rsvpCount: party.rsvpCount - 1 } : party));
+      if (next.has(eventId)) {
+        next.delete(eventId);
+        setEvents((list) =>
+          list.map((e) => (e.id === eventId ? { ...e, rsvpCount: Math.max(0, e.rsvpCount - 1) } : e))
+        );
       } else {
-        next.add(partyId);
-        setParties(p => p.map(party => party.id === partyId ? { ...party, rsvpCount: party.rsvpCount + 1 } : party));
+        next.add(eventId);
+        setEvents((list) =>
+          list.map((e) => (e.id === eventId ? { ...e, rsvpCount: e.rsvpCount + 1 } : e))
+        );
       }
       return next;
     });
   };
 
-  const handlePostParty = (newParty) => {
-    setParties(prev => [newParty, ...prev]);
-    scrollTo('browse');
+  const handleCreateEvent = (newEvent) => {
+    setEvents((prev) => [newEvent, ...prev]);
+    setActivePage('explore');
   };
 
-  const handleFacecardUpdate = (requestId, newStatus) => {
-    setFacecardRequests(prev =>
-      prev.map(r => r.id === requestId ? { ...r, status: newStatus } : r)
+  const handleApproveFacecard = (id) => {
+    setFacecards((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, status: 'approved' } : f))
     );
   };
 
-  const handleNewFacecard = (newRequest) => {
-    setFacecardRequests(prev => [newRequest, ...prev]);
+  const handleDeclineFacecard = (id) => {
+    setFacecards((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, status: 'declined' } : f))
+    );
   };
 
-  const handleFacecardFromCard = (party) => {
-    scrollTo('facecard');
+  const handleNewFacecardRequest = (req) => {
+    setFacecards((prev) => [req, ...prev]);
   };
 
-  // Filtered parties
-  const vibes = [...new Set(parties.map(p => p.vibe))];
-  const filteredParties = parties.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.area.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.vibe.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchVibe = vibeFilter === 'all' || p.vibe === vibeFilter;
-    return matchSearch && matchVibe;
+  // Filtered Events Logic
+  const filteredEvents = events.filter((e) => {
+    const matchCategory = activeCategory === 'all' || e.category === activeCategory;
+    const matchCity = selectedCity === 'All Zambia' || e.city === selectedCity || e.area.includes(selectedCity);
+    const matchSearch =
+      searchQuery === '' ||
+      e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      e.area.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      e.vibe.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchCategory && matchCity && matchSearch;
   });
 
   return (
-    <div className="min-h-screen">
-      <Navbar activeSection={activeSection} onNavigate={scrollTo} />
+    <div className="min-h-screen bg-background text-text-primary selection:bg-accent selection:text-white pb-24">
+      {/* Top Navbar */}
+      <Navbar activeSection={activePage} onNavigate={(page) => setActivePage(page)} />
 
-      {/* ============ HERO ============ */}
-      <section ref={heroRef} className="pt-24 pb-16 md:pt-32 md:pb-24 px-4">
-        <div className="max-w-4xl mx-auto text-center">
-          {/* Glowing circle */}
-          <div className="relative inline-block mb-8">
-            <div className="w-20 h-20 rounded-full flex items-center justify-center text-4xl"
-              style={{ background: 'linear-gradient(135deg, #E040FB, #7C4DFF)', boxShadow: '0 0 60px rgba(224,64,251,0.3)' }}>
-              🎊
+      {/* Main Container with Page View Snapshot feel */}
+      <main className="pt-20 px-4 max-w-7xl mx-auto min-h-[calc(100vh-6rem)]">
+        {/* ================= PAGE 1: EXPLORE EVENTS ================= */}
+        {activePage === 'explore' && (
+          <div className="animate-fade-in space-y-8">
+            {/* Landing Hero Header */}
+            <div className="text-center py-6 max-w-4xl mx-auto">
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-accent text-xs font-bold mb-4 backdrop-blur-md shadow-lg animate-pulse">
+                <Sparkles className="w-4 h-4 text-accent" /> Zambia's Social Event & Networking Hub
+              </div>
+              <h1 className="text-3xl sm:text-5xl font-black tracking-tight mb-4 leading-tight">
+                Discover <span className="bg-clip-text text-transparent" style={{ backgroundImage: 'linear-gradient(135deg, #E040FB, #7C4DFF, #00E5FF)' }}>Events & Mixers</span>
+              </h1>
+              <p className="text-sm sm:text-base text-text-secondary max-w-2xl mx-auto mb-6">
+                From Afrobeats galas to tech founder mixers and rooftop lounges in Lusaka, Kitwe, and Ndola.
+              </p>
+
+              {/* Search Bar */}
+              <div className="max-w-2xl mx-auto relative">
+                <Search className="w-5 h-5 text-text-secondary absolute left-4 top-3.5" />
+                <input
+                  type="text"
+                  placeholder="Search by event, area (e.g. Kabulonga, Roma), or vibe..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-surface/90 border border-white/15 rounded-2xl pl-12 pr-4 py-3 text-sm text-white focus:outline-none focus:border-accent shadow-xl backdrop-blur-xl"
+                />
+              </div>
             </div>
-          </div>
 
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tight mb-4 leading-tight">
-            Party At <span className="bg-clip-text text-transparent" style={{ backgroundImage: 'linear-gradient(135deg, #E040FB, #7C4DFF, #00E5FF)' }}>My Place</span>
-          </h1>
+            {/* Category Filter Bar */}
+            <EventFilter
+              activeCategory={activeCategory}
+              onCategoryChange={setActiveCategory}
+              selectedCity={selectedCity}
+              onCityChange={setSelectedCity}
+            />
 
-          <p className="text-lg md:text-xl text-text-secondary max-w-2xl mx-auto mb-8">
-            Zambia's hottest party discovery platform. Find the vibes, post the event, or secure your exclusive invite.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <button onClick={() => scrollTo('browse')} className="btn-accent text-base px-8 py-3.5">
-              🔥 Browse Parties
-            </button>
-            <button onClick={() => scrollTo('post')} className="btn-outline text-base px-8 py-3.5">
-              🎉 Post a Party
-            </button>
-          </div>
-
-          {/* Stats */}
-          <div className="flex justify-center gap-8 md:gap-12 mt-12">
-            <div className="text-center">
-              <div className="text-2xl md:text-3xl font-black text-accent">{parties.length}</div>
-              <div className="text-xs text-text-muted mt-1">Active Parties</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl md:text-3xl font-black text-cyan">{parties.reduce((sum, p) => sum + p.rsvpCount, 0)}+</div>
-              <div className="text-xs text-text-muted mt-1">RSVPs</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl md:text-3xl font-black text-amber">{facecardRequests.length}</div>
-              <div className="text-xs text-text-muted mt-1">Facecard Requests</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ============ BROWSE ============ */}
-      <section ref={browseRef} id="browse" className="py-16 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-10">
-            <h2 className="section-title">🔥 What's Popping</h2>
-            <p className="section-subtitle">Find your next turn-up</p>
-          </div>
-
-          {/* Search & Filter */}
-          <div className="flex flex-col sm:flex-row gap-3 mb-8 max-w-2xl mx-auto">
-            <div className="relative flex-1">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted">🔍</span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search parties, areas, vibes..."
-                className="input-dark pl-11"
-              />
-            </div>
-            <select
-              value={vibeFilter}
-              onChange={(e) => setVibeFilter(e.target.value)}
-              className="input-dark sm:w-48"
-            >
-              <option value="all">All Vibes</option>
-              {vibes.map(v => <option key={v} value={v}>{v}</option>)}
-            </select>
-          </div>
-
-          {/* Party Grid */}
-          {filteredParties.length === 0 ? (
-            <div className="text-center py-16">
-              <p className="text-4xl mb-3">😭</p>
-              <p className="text-text-secondary">No parties match your search. Try a different vibe!</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {filteredParties.map((party, i) => (
-                <div key={party.id} style={{ animationDelay: `${i * 0.08}s` }}>
+            {/* Events Grid */}
+            {filteredEvents.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredEvents.map((evt) => (
                   <PartyCard
-                    party={party}
+                    key={evt.id}
+                    party={evt}
                     onRSVP={handleRSVP}
-                    isRSVPed={rsvps.has(party.id)}
-                    onFacecard={handleFacecardFromCard}
+                    isRSVPed={rsvps.has(evt.id)}
+                    onFacecard={() => setActivePage('facecard')}
+                    onGetTickets={(e) => setTicketModalEvent(e)}
+                    onViewAttendees={(e) => setNetworkingModalEvent(e)}
                   />
-                </div>
-              ))}
+                ))}
+              </div>
+            ) : (
+              <div className="bg-surface/80 border border-white/10 rounded-3xl p-12 text-center max-w-md mx-auto">
+                <p className="text-4xl mb-3">🔍</p>
+                <h3 className="text-lg font-bold text-white mb-1">No matching events found</h3>
+                <p className="text-xs text-text-secondary mb-4">Try adjusting your filters or search term.</p>
+                <button
+                  onClick={() => { setActiveCategory('all'); setSelectedCity('All Zambia'); setSearchQuery(''); }}
+                  className="btn-accent px-4 py-2 text-xs font-bold"
+                >
+                  Reset Filters
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= PAGE 2: LIVE MAP VIEW ================= */}
+        {activePage === 'map' && (
+          <div className="animate-fade-in space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-black text-white flex items-center gap-2">
+                  📍 Interactive Event Map
+                </h2>
+                <p className="text-xs text-text-secondary">Pinpointed live events across Zambia</p>
+              </div>
+              <button
+                onClick={() => setActivePage('explore')}
+                className="btn-outline px-3 py-1.5 text-xs font-bold"
+              >
+                Back to List View
+              </button>
             </div>
-          )}
-        </div>
-      </section>
 
-      {/* ============ POST A PARTY ============ */}
-      <section ref={postRef} id="post" className="py-16 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-10">
-            <h2 className="section-title">🎉 Post Your Party</h2>
-            <p className="section-subtitle">Put your event on the map</p>
+            <EventMap
+              events={filteredEvents}
+              onSelectEvent={(evt) => setNetworkingModalEvent(evt)}
+              onGetTickets={(evt) => setTicketModalEvent(evt)}
+            />
           </div>
-          <PostPartyForm onSubmit={handlePostParty} />
-        </div>
-      </section>
+        )}
 
-      {/* ============ FACECARD ============ */}
-      <section ref={facecardRef} id="facecard" className="py-16 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-10">
-            <h2 className="section-title">📸 Facecard</h2>
-            <p className="section-subtitle">Show your face, get the place</p>
+        {/* ================= PAGE 3: HOST PORTAL ================= */}
+        {activePage === 'host' && (
+          <div className="animate-fade-in space-y-6">
+            <HostDashboard
+              events={events}
+              facecards={facecards}
+              onApproveFacecard={handleApproveFacecard}
+              onDeclineFacecard={handleDeclineFacecard}
+              onCreateEvent={handleCreateEvent}
+            />
           </div>
-          <FacecardSection
-            parties={parties}
-            facecardRequests={facecardRequests}
-            onUpdateRequest={handleFacecardUpdate}
-            onNewRequest={handleNewFacecard}
-          />
-        </div>
-      </section>
+        )}
 
-      {/* ============ FOOTER ============ */}
-      <footer className="border-t border-border py-8 px-4">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black"
-              style={{ background: 'linear-gradient(135deg, #E040FB, #7C4DFF)' }}>
-              P
+        {/* ================= PAGE 4: FACECARD VIP SECTION ================= */}
+        {activePage === 'facecard' && (
+          <div className="animate-fade-in space-y-6">
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-bold mb-2">
+                <ShieldAlert className="w-3.5 h-3.5" /> Exclusive Guestlist & VIP Invites
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black text-white">Facecard VIP Engine</h2>
+              <p className="text-xs text-text-secondary max-w-md mx-auto">
+                Upload your selfie to request exclusive guestlist access from verified hosts.
+              </p>
             </div>
-            <span className="font-bold text-sm">
-              PAM<span className="text-accent">P</span>
-            </span>
+
+            <FacecardSection
+              parties={events}
+              facecardRequests={facecards}
+              onUpdateRequest={(id, status) =>
+                status === 'approved' ? handleApproveFacecard(id) : handleDeclineFacecard(id)
+              }
+              onNewRequest={handleNewFacecardRequest}
+            />
           </div>
-          <p className="text-text-muted text-sm text-center">
-            Made with 💜 in Lusaka, Zambia · © 2026 PAMP
-          </p>
-          <div className="flex gap-4 text-text-muted text-sm">
-            <a href="#" className="hover:text-accent transition">Instagram</a>
-            <a href="#" className="hover:text-accent transition">TikTok</a>
-            <a href="#" className="hover:text-accent transition">WhatsApp</a>
-          </div>
-        </div>
-      </footer>
+        )}
+      </main>
+
+      {/* ================= FLOATING BOTTOM NAVIGATION BAR ================= */}
+      {/* Positioned fixed at the bottom, never obscured by search bars or content */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md bg-slate-950/90 border border-white/15 rounded-3xl p-1.5 shadow-2xl backdrop-blur-xl flex items-center justify-around">
+        <button
+          onClick={() => setActivePage('explore')}
+          className={`flex-1 py-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all ${
+            activePage === 'explore'
+              ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
+              : 'text-text-secondary hover:text-white'
+          }`}
+        >
+          <Flame className="w-4 h-4" />
+          <span>Events</span>
+        </button>
+
+        <button
+          onClick={() => setActivePage('map')}
+          className={`flex-1 py-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all ${
+            activePage === 'map'
+              ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
+              : 'text-text-secondary hover:text-white'
+          }`}
+        >
+          <Map className="w-4 h-4" />
+          <span>Map</span>
+        </button>
+
+        <button
+          onClick={() => setActivePage('host')}
+          className={`flex-1 py-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all ${
+            activePage === 'host'
+              ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
+              : 'text-text-secondary hover:text-white'
+          }`}
+        >
+          <PlusCircle className="w-4 h-4" />
+          <span>Host</span>
+        </button>
+
+        <button
+          onClick={() => setActivePage('facecard')}
+          className={`flex-1 py-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all ${
+            activePage === 'facecard'
+              ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
+              : 'text-text-secondary hover:text-white'
+          }`}
+        >
+          <ShieldAlert className="w-4 h-4" />
+          <span>Facecard</span>
+        </button>
+      </div>
+
+      {/* ================= MODALS ================= */}
+      <TicketModal
+        event={ticketModalEvent}
+        isOpen={Boolean(ticketModalEvent)}
+        onClose={() => setTicketModalEvent(null)}
+      />
+
+      <AttendeeNetworkingModal
+        event={networkingModalEvent}
+        isOpen={Boolean(networkingModalEvent)}
+        onClose={() => setNetworkingModalEvent(null)}
+      />
     </div>
   );
 }
