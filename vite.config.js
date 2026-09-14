@@ -32,12 +32,13 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.includes('/storage/v1/object/public/'),
+            urlPattern: ({ url }) =>
+              url.hostname === 'images.unsplash.com' || url.pathname.includes('/storage/v1/object/public/'),
             handler: 'CacheFirst',
             options: { cacheName: 'event-images', expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 } },
           },
           {
-            urlPattern: ({ url }) => url.hostname.endsWith('basemaps.cartocdn.com'),
+            urlPattern: ({ url }) => url.hostname === 'tile.openstreetmap.org',
             handler: 'CacheFirst',
             options: { cacheName: 'map-tiles', expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 14 } },
           },

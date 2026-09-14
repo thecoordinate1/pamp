@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { Camera, CheckCircle2, MapPin, MessageCircle } from 'lucide-react';
+
+const CONFETTI_COLORS = ['#E040FB', '#7C4DFF', '#F3B8FC', '#FFFFFF'];
 
 export default function FacecardSection({ parties, facecardRequests, onUpdateRequest, onNewRequest }) {
   const [activeTab, setActiveTab] = useState('request');
@@ -43,42 +46,51 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
 
   const handleApprove = (requestId) => {
     onUpdateRequest(requestId, 'approved');
-    triggerConfetti();
+    setShowConfetti(true);
+    setTimeout(() => setShowConfetti(false), 3000);
   };
 
   const handleDecline = (requestId) => {
     onUpdateRequest(requestId, 'declined');
   };
 
-  const triggerConfetti = () => {
-    setShowConfetti(true);
-    setTimeout(() => setShowConfetti(false), 3000);
-  };
-
-  const handleRevealAddress = (party) => {
-    setRevealedAddress(party);
-    triggerConfetti();
-  };
+  // Requests come in two shapes (seed data vs. this form), so read either.
+  const requests = facecardRequests.map((r) => {
+    const name = r.name || r.userName || 'Guest';
+    const initial = (name.match(/[A-Za-z0-9]/)?.[0] || '?').toUpperCase();
+    return {
+      ...r,
+      name,
+      message: r.message || r.reason || '',
+      partyId: r.partyId ?? parties.find((p) => p.name === r.eventTitle)?.id,
+      selfieUrl:
+        r.selfieUrl ||
+        `data:image/svg+xml,${encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E040FB"/><stop offset="1" stop-color="#7C4DFF"/></linearGradient></defs><rect width="48" height="48" fill="url(#g)"/><text x="24" y="31" text-anchor="middle" font-family="Outfit, sans-serif" font-size="20" font-weight="700" fill="#fff">${initial}</text></svg>`
+        )}`,
+    };
+  });
 
   const filteredRequests = hostPartyFilter === 'all'
-    ? facecardRequests
-    : facecardRequests.filter(r => r.partyId === parseInt(hostPartyFilter));
+    ? requests
+    : requests.filter(r => r.partyId === parseInt(hostPartyFilter));
 
-  const pendingCount = facecardRequests.filter(r => r.status === 'pending').length;
-  const approvedRequests = facecardRequests.filter(r => r.status === 'approved');
+  const pendingCount = requests.filter(r => r.status === 'pending').length;
+  const approvedRequests = requests.filter(
+    (r) => r.status === 'approved' && parties.some((p) => p.id === r.partyId)
+  );
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Confetti */}
+    <div>
       {showConfetti && (
-        <div className="fixed inset-0 pointer-events-none z-50">
+        <div className="fixed inset-0 pointer-events-none z-50" aria-hidden="true">
           {Array.from({ length: 30 }).map((_, i) => (
             <div
               key={i}
               className="confetti-piece"
               style={{
                 left: `${Math.random() * 100}%`,
-                backgroundColor: ['#E040FB', '#00E5FF', '#FFD740', '#69F0AE', '#7C4DFF'][Math.floor(Math.random() * 5)],
+                backgroundColor: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
                 animationDelay: `${Math.random() * 1}s`,
                 animationDuration: `${2 + Math.random() * 2}s`,
               }}
@@ -87,155 +99,136 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-8 bg-surface rounded-2xl p-1.5">
-        <button
-          onClick={() => setActiveTab('request')}
-          className={`flex-1 py-3 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer
-            ${activeTab === 'request'
-              ? 'bg-accent text-white shadow-lg shadow-accent/20'
-              : 'text-text-secondary hover:text-text-primary'
-            }`}
-        >
-          📸 Request an Invite
+      <div role="tablist" aria-label="Facecard" className="segmented max-w-sm mb-8">
+        <button type="button" role="tab" aria-selected={activeTab === 'request'} onClick={() => setActiveTab('request')}>
+          Request an invite
         </button>
-        <button
-          onClick={() => setActiveTab('host')}
-          className={`flex-1 py-3 rounded-xl font-semibold text-sm transition-all duration-300 relative cursor-pointer
-            ${activeTab === 'host'
-              ? 'bg-accent text-white shadow-lg shadow-accent/20'
-              : 'text-text-secondary hover:text-text-primary'
-            }`}
-        >
-          👑 Host View
-          {pendingCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red rounded-full text-xs flex items-center justify-center text-white font-bold pulse-glow">
-              {pendingCount}
-            </span>
-          )}
+        <button type="button" role="tab" aria-selected={activeTab === 'host'} onClick={() => setActiveTab('host')}>
+          Host view
+          {pendingCount > 0 && <span className="ml-1.5 text-accent">{pendingCount}</span>}
         </button>
       </div>
 
-      {/* Request Tab */}
       {activeTab === 'request' && (
-        <div className="glass-card p-6 md:p-8 fade-in-up">
-          <div className="text-center mb-6">
-            <h3 className="text-xl font-bold text-text-primary mb-2">Show Your Face, Get In</h3>
-            <p className="text-text-secondary text-sm">Upload a selfie to request an exclusive invite. The host decides!</p>
-          </div>
-
-          <form onSubmit={handleSubmitRequest} className="space-y-5">
-            {/* Selfie Upload */}
-            <div className="flex flex-col items-center">
-              <label className="relative cursor-pointer group">
-                <div className={`w-32 h-32 rounded-2xl border-2 border-dashed flex items-center justify-center overflow-hidden
-                  ${selfiePreview ? 'border-accent' : 'border-border-light hover:border-accent'} transition`}>
+        <div className="card max-w-2xl p-6 sm:p-10 animate-fade-in">
+          <form onSubmit={handleSubmitRequest} className="space-y-6">
+            <div className="flex flex-col items-center text-center">
+              <label className="relative cursor-pointer group" aria-label="Add a selfie">
+                <span
+                  className={`flex w-28 h-28 items-center justify-center overflow-hidden rounded-full transition-colors duration-200 ${
+                    selfiePreview
+                      ? 'shadow-[0_0_0_3px_#E040FB]'
+                      : 'bg-white/5 border border-dashed border-white/20 group-hover:border-accent/60'
+                  }`}
+                >
                   {selfiePreview ? (
-                    <img src={selfiePreview} alt="selfie" className="w-full h-full object-cover" />
+                    <img src={selfiePreview} alt="Your selfie" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="text-center">
-                      <div className="text-3xl mb-1">📸</div>
-                      <div className="text-xs text-text-muted">Tap to upload</div>
-                    </div>
+                    <Camera className="w-7 h-7 text-text-secondary" />
                   )}
-                </div>
-                <input type="file" accept="image/*" capture="user" className="hidden" onChange={handleSelfieChange} />
+                </span>
+                <input type="file" accept="image/*" capture="user" className="sr-only" onChange={handleSelfieChange} />
               </label>
-              {selfiePreview && (
-                <button type="button" onClick={() => setSelfiePreview(null)} className="text-xs text-text-muted mt-2 hover:text-red transition cursor-pointer">
+              {selfiePreview ? (
+                <button
+                  type="button"
+                  onClick={() => setSelfiePreview(null)}
+                  className="mt-3 text-sm font-medium text-text-secondary hover:text-white"
+                >
                   Remove photo
                 </button>
+              ) : (
+                <p className="mt-3 text-sm text-text-secondary">Add a selfie so the host knows who's coming.</p>
               )}
             </div>
 
-            {/* Name */}
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-2">Your Name *</label>
+              <label htmlFor="facecard-name" className="field-label">Your name</label>
               <input
+                id="facecard-name"
                 type="text"
                 value={guestName}
                 onChange={(e) => setGuestName(e.target.value)}
-                placeholder="e.g. Mwila K."
+                placeholder="Mwila K."
                 className="input-dark"
                 required
               />
             </div>
 
-            {/* Party */}
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-2">Which Party? *</label>
+              <label htmlFor="facecard-event" className="field-label">Event</label>
               <select
+                id="facecard-event"
                 value={selectedParty}
                 onChange={(e) => setSelectedParty(e.target.value)}
                 className="input-dark"
                 required
               >
-                <option value="">Select a party</option>
+                <option value="">Choose an event</option>
                 {parties.map(p => (
                   <option key={p.id} value={p.id}>{p.name} — {p.area}</option>
                 ))}
               </select>
             </div>
 
-            {/* Message */}
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-2">Say something to the host</label>
+              <label htmlFor="facecard-message" className="field-label">Note to the host</label>
               <textarea
+                id="facecard-message"
                 value={guestMessage}
                 onChange={(e) => setGuestMessage(e.target.value)}
-                placeholder="Why should they let you in? 😏"
-                rows={2}
+                placeholder="Why should they let you in?"
+                rows={3}
                 className="input-dark resize-none"
               />
             </div>
 
-            <button type="submit" className="btn-accent w-full py-3">
-              📲 Submit Facecard
+            <button type="submit" className="btn-accent w-full">
+              Send request
             </button>
 
             {submitted && (
-              <div className="bg-green-dim border border-green/30 rounded-xl p-4 text-green text-sm text-center fade-in-up">
-                ✅ Facecard submitted! The host will review your request.
-              </div>
+              <p role="status" className="flex items-center justify-center gap-2 text-sm font-medium text-green animate-fade-in">
+                <CheckCircle2 className="w-4 h-4" />
+                Request sent. The host will review it.
+              </p>
             )}
           </form>
 
-          {/* Approved — reveal address */}
           {approvedRequests.length > 0 && (
-            <div className="mt-8 pt-6 border-t border-border">
-              <h4 className="text-lg font-bold text-green mb-4">🎉 You're Approved!</h4>
-              <div className="space-y-3">
+            <div className="mt-10 pt-8 border-t border-white/5">
+              <h3 className="text-lg font-semibold text-white">You're approved</h3>
+              <ul className="mt-4 space-y-2">
                 {approvedRequests.map(req => {
                   const party = parties.find(p => p.id === req.partyId);
                   if (!party) return null;
                   return (
-                    <div key={req.id} className="bg-green-dim/50 rounded-xl p-4 flex items-center justify-between">
-                      <div>
-                        <span className="font-semibold text-text-primary">{party.name}</span>
-                        <span className="text-text-muted text-sm ml-2">({req.name})</span>
+                    <li key={req.id} className="flex items-center justify-between gap-3 rounded-2xl bg-white/5 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-white truncate">{party.name}</p>
+                        <p className="text-[13px] text-text-muted">{req.name}</p>
                       </div>
-                      <button
-                        onClick={() => handleRevealAddress(party)}
-                        className="text-sm font-semibold text-green hover:underline cursor-pointer"
-                      >
-                        📍 Reveal Address
+                      <button type="button" onClick={() => setRevealedAddress(party)} className="btn-secondary min-h-9 h-9 px-4 text-sm">
+                        <MapPin className="w-4 h-4" />
+                        Address
                       </button>
-                    </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
 
               {revealedAddress && (
-                <div className="mt-4 bg-accent-dim border border-accent/30 rounded-xl p-4 fade-in-up">
-                  <p className="text-accent font-semibold mb-1">📍 Full Address:</p>
-                  <p className="text-text-primary">{revealedAddress.fullAddress}</p>
+                <div className="mt-4 rounded-2xl bg-accent/10 px-5 py-4 animate-fade-in">
+                  <p className="eyebrow">Address</p>
+                  <p className="mt-1 text-white">{revealedAddress.fullAddress}</p>
                   <a
                     href={`https://wa.me/${revealedAddress.whatsapp?.replace(/[^0-9]/g, '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-block mt-2 text-sm text-green hover:underline"
+                    className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-accent-hover hover:underline"
                   >
-                    💬 Message the host on WhatsApp
+                    <MessageCircle className="w-4 h-4" />
+                    Message the host on WhatsApp
                   </a>
                 </div>
               )}
@@ -244,79 +237,59 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
         </div>
       )}
 
-      {/* Host Tab */}
       {activeTab === 'host' && (
-        <div className="fade-in-up">
-          {/* Filter */}
-          <div className="mb-6">
-            <select
-              value={hostPartyFilter}
-              onChange={(e) => setHostPartyFilter(e.target.value)}
-              className="input-dark max-w-xs"
-            >
-              <option value="all">All Parties</option>
-              {parties.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
+        <div className="animate-fade-in">
+          <label htmlFor="facecard-filter" className="sr-only">Filter by event</label>
+          <select
+            id="facecard-filter"
+            value={hostPartyFilter}
+            onChange={(e) => setHostPartyFilter(e.target.value)}
+            className="input-dark max-w-xs mb-6"
+          >
+            <option value="all">All events</option>
+            {parties.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
 
-          {/* Request cards */}
           {filteredRequests.length === 0 ? (
-            <div className="glass-card p-12 text-center">
-              <p className="text-4xl mb-3">📭</p>
-              <p className="text-text-secondary">No facecard requests yet</p>
-            </div>
+            <p className="card py-12 text-center text-text-secondary">No requests yet.</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredRequests.map((req) => {
                 const party = parties.find(p => p.id === req.partyId);
                 return (
-                  <div
-                    key={req.id}
-                    className={`glass-card p-5 fade-in-up
-                      ${req.status === 'approved' ? 'border-green/30' : ''}
-                      ${req.status === 'declined' ? 'border-red/30 opacity-60' : ''}
-                    `}
-                  >
-                    {/* Selfie */}
-                    <div className="flex items-center gap-3 mb-3">
-                      <img
-                        src={req.selfieUrl}
-                        alt={req.name}
-                        className="w-14 h-14 rounded-xl object-cover border-2 border-border"
-                      />
-                      <div>
-                        <h4 className="font-bold text-text-primary">{req.name}</h4>
-                        <p className="text-xs text-text-muted">{party?.name || 'Unknown Party'}</p>
+                  <div key={req.id} className={`card p-5 flex flex-col ${req.status === 'declined' ? 'opacity-60' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <img src={req.selfieUrl} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-white truncate">{req.name}</p>
+                        <p className="text-[13px] text-text-muted truncate">{party?.name || 'Unknown event'}</p>
                       </div>
                     </div>
 
-                    {/* Message */}
-                    <p className="text-sm text-text-secondary mb-4 italic">"{req.message}"</p>
+                    <p className="mt-3 mb-5 text-[15px] leading-relaxed text-text-secondary">“{req.message}”</p>
 
-                    {/* Status / Actions */}
-                    {req.status === 'pending' ? (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleApprove(req.id)}
-                          className="flex-1 py-2 rounded-xl font-semibold text-sm bg-green-dim text-green hover:bg-green/20 transition cursor-pointer"
+                    <div className="mt-auto">
+                      {req.status === 'pending' ? (
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => handleDecline(req.id)} className="btn-secondary flex-1">
+                            Decline
+                          </button>
+                          <button type="button" onClick={() => handleApprove(req.id)} className="btn-accent flex-1">
+                            Approve
+                          </button>
+                        </div>
+                      ) : (
+                        <p
+                          className={`rounded-full py-2 text-center text-sm font-semibold ${
+                            req.status === 'approved' ? 'bg-green/15 text-green' : 'bg-white/6 text-text-muted'
+                          }`}
                         >
-                          ✓ Approve
-                        </button>
-                        <button
-                          onClick={() => handleDecline(req.id)}
-                          className="flex-1 py-2 rounded-xl font-semibold text-sm bg-red-dim text-red hover:bg-red/20 transition cursor-pointer"
-                        >
-                          ✗ Decline
-                        </button>
-                      </div>
-                    ) : (
-                      <div className={`text-center py-2 rounded-xl text-sm font-semibold
-                        ${req.status === 'approved' ? 'bg-green-dim text-green' : 'bg-red-dim text-red'}`}>
-                        {req.status === 'approved' ? '✓ Approved' : '✗ Declined'}
-                      </div>
-                    )}
+                          {req.status === 'approved' ? 'Approved' : 'Declined'}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}

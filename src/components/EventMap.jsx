@@ -1,103 +1,81 @@
-import { useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Calendar, MapPin, Users, Ticket, Sparkles } from 'lucide-react';
+import { MapPin } from 'lucide-react';
 
-// Custom SVG map pins for categories
-const createCustomIcon = (category) => {
-  const colorMap = {
-    tech_business: '#00E5FF',
-    party: '#E040FB',
-    creative_arts: '#FFD700',
-    vip_lounge: '#7C4DFF',
-    default: '#E040FB'
-  };
-  const color = colorMap[category] || colorMap.default;
+const CATEGORY_PINS = [
+  { id: 'party', label: 'Parties', color: '#E040FB' },
+  { id: 'vip_lounge', label: 'VIP lounge', color: '#7C4DFF' },
+  { id: 'tech_business', label: 'Tech & business', color: '#00E5FF' },
+  { id: 'creative_arts', label: 'Creative', color: '#FFD740' },
+];
 
-  const svgHtml = `
-    <div style="
-      background-color: ${color};
-      width: 32px;
-      height: 32px;
-      border-radius: 50% 50% 50% 0;
-      transform: rotate(-45deg);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 0 15px ${color};
-      border: 2px solid #ffffff;
-    ">
-      <div style="
-        width: 12px;
-        height: 12px;
-        background-color: #0d0f17;
-        border-radius: 50%;
-        transform: rotate(45deg);
-      "></div>
-    </div>
-  `;
+const iconCache = new Map();
 
-  return L.divIcon({
-    html: svgHtml,
-    className: 'custom-leaflet-marker',
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
-    popupAnchor: [0, -32]
-  });
-};
+function pinIcon(category) {
+  const color = (CATEGORY_PINS.find((c) => c.id === category) || CATEGORY_PINS[0]).color;
+  if (!iconCache.has(color)) {
+    iconCache.set(
+      color,
+      L.divIcon({
+        className: '',
+        html: `<span style="display:block;width:22px;height:22px;border-radius:9999px;background:${color};border:3px solid #0D0D0D;box-shadow:0 0 0 2px ${color}66,0 6px 16px rgba(0,0,0,.5)"></span>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+        popupAnchor: [0, -14],
+      })
+    );
+  }
+  return iconCache.get(color);
+}
 
 export default function EventMap({ events, onSelectEvent, onGetTickets }) {
   const defaultCenter = [-15.416, 28.322]; // Lusaka center
 
   return (
-    <div className="relative w-full h-[520px] rounded-3xl overflow-hidden border border-white/10 shadow-2xl">
-      <MapContainer
-        center={defaultCenter}
-        zoom={12}
-        scrollWheelZoom={false}
-        className="w-full h-full z-0"
-      >
+    <div className="relative w-full h-[62vh] min-h-[420px] overflow-hidden rounded-3xl border border-white/10">
+      <MapContainer center={defaultCenter} zoom={12} scrollWheelZoom={false} className="w-full h-full z-0">
+        {/* OSM tiles need no key but are only for light use; move to a paid tile plan before launch. */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          className="map-tiles-dark"
+          maxZoom={19}
         />
 
         {events.map((evt) => {
           if (!evt.coordinates || evt.coordinates.length !== 2) return null;
           return (
-            <Marker
-              key={evt.id}
-              position={evt.coordinates}
-              icon={createCustomIcon(evt.category)}
-            >
-              <Popup className="custom-map-popup">
-                <div className="p-1 max-w-[240px]">
-                  <img
-                    src={evt.image}
-                    alt={evt.name}
-                    className="w-full h-28 object-cover rounded-xl mb-2"
-                  />
-                  <span className="inline-block px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-full bg-accent/20 text-accent mb-1">
-                    {evt.vibe}
-                  </span>
-                  <h4 className="font-bold text-sm text-gray-900 leading-tight mb-1">
-                    {evt.name}
-                  </h4>
-                  <div className="flex items-center gap-1 text-xs text-gray-600 mb-2">
-                    <MapPin className="w-3 h-3 text-gray-400 shrink-0" />
+            <Marker key={evt.id} position={evt.coordinates} icon={pinIcon(evt.category)}>
+              <Popup className="custom-map-popup" closeButton={false}>
+                <div className="w-56">
+                  <img src={evt.image} alt="" className="w-full h-28 object-cover rounded-xl" />
+                  <div className="eyebrow mt-3">{evt.vibe}</div>
+                  <div className="mt-0.5 text-[15px] font-bold leading-snug text-white">{evt.name}</div>
+                  <div className="mt-1 flex items-center gap-1 text-xs text-text-secondary">
+                    <MapPin className="w-3 h-3 shrink-0" />
                     <span className="truncate">{evt.area}</span>
                   </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                    <span className="font-bold text-xs text-purple-700">
-                      {evt.ticketPrice === 0 ? 'FREE' : `${evt.currency || 'ZMW'} ${evt.ticketPrice}`}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-white">
+                      {evt.ticketPrice ? `${evt.currency || 'ZMW'} ${evt.ticketPrice}` : 'Free'}
                     </span>
-                    <button
-                      onClick={() => onGetTickets(evt)}
-                      className="px-2.5 py-1 text-xs font-bold text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg hover:opacity-90 shadow-sm flex items-center gap-1"
-                    >
-                      <Ticket className="w-3 h-3" /> Get Pass
-                    </button>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onSelectEvent(evt)}
+                        className="h-8 px-3 rounded-full text-xs font-semibold bg-white/10 text-white hover:bg-white/15"
+                      >
+                        Who's going
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onGetTickets(evt)}
+                        className="brand-gradient h-8 px-3 rounded-full text-xs font-semibold text-white"
+                      >
+                        Get pass
+                      </button>
+                    </div>
                   </div>
                 </div>
               </Popup>
@@ -106,11 +84,17 @@ export default function EventMap({ events, onSelectEvent, onGetTickets }) {
         })}
       </MapContainer>
 
-      {/* Map Overlay Badge */}
-      <div className="absolute top-4 left-4 z-[400] bg-slate-900/90 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-lg flex items-center gap-2 text-white">
-        <Sparkles className="w-4 h-4 text-accent animate-pulse" />
-        <span className="text-xs font-semibold">Live Events Map — Lusaka & Beyond</span>
-      </div>
+      <ul
+        aria-label="Map legend"
+        className="glass absolute left-3 top-3 z-[400] rounded-2xl px-3.5 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-text-secondary"
+      >
+        {CATEGORY_PINS.map(({ id, label, color }) => (
+          <li key={id} className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} aria-hidden="true" />
+            {label}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

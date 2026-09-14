@@ -1,54 +1,31 @@
 import { useState } from 'react';
-import { Flame, ThumbsUp, Sparkles } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import { Flame } from 'lucide-react';
 
-export default function VibeRating({ eventId, initialScore = 92 }) {
+export default function VibeRating({ initialScore = 92 }) {
   const [score, setScore] = useState(initialScore);
   const [hasVoted, setHasVoted] = useState(false);
 
-  const handleVote = (delta) => {
+  const handleVote = () => {
     if (hasVoted) return;
-    setScore(score + delta);
+    setScore((s) => Math.min(100, s + 1));
     setHasVoted(true);
-
-    if (delta > 0) {
-      confetti({
-        particleCount: 40,
-        spread: 50,
-        origin: { y: 0.8 }
-      });
-    }
   };
 
   return (
-    <div className="bg-slate-900/80 border border-white/10 rounded-2xl p-3 flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center animate-pulse">
-          <Flame className="w-4 h-4" />
-        </div>
-        <div>
-          <div className="text-[10px] text-text-secondary font-semibold uppercase tracking-wider">
-            Live Crowd Vibe
-          </div>
-          <div className="text-xs font-black text-white flex items-center gap-1">
-            <span className="text-orange-400">{score}% Lit</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => handleVote(1)}
-          disabled={hasVoted}
-          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-            hasVoted
-              ? 'bg-white/5 text-gray-500 cursor-not-allowed'
-              : 'bg-orange-500/20 text-orange-400 hover:bg-orange-500 hover:text-white border border-orange-500/30'
-          }`}
-        >
-          🔥 Fire (+1)
-        </button>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={handleVote}
+      disabled={hasVoted}
+      aria-pressed={hasVoted}
+      aria-label={hasVoted ? `You hyped this. ${score}% lit` : `Vibe ${score}% lit. Tap to hype it`}
+      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-[13px] font-semibold transition-colors duration-200 ${
+        hasVoted
+          ? 'bg-accent/15 text-accent-hover'
+          : 'bg-white/6 text-text-secondary hover:text-white hover:bg-white/10'
+      }`}
+    >
+      <Flame className="w-3.5 h-3.5" fill={hasVoted ? 'currentColor' : 'none'} />
+      {score}% lit
+    </button>
   );
 }

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Search } from 'lucide-react';
 import Navbar from './components/Navbar';
+import TabBar from './components/TabBar';
 import PartyCard from './components/PartyCard';
 import EventMap from './components/EventMap';
 import EventFilter from './components/EventFilter';
@@ -7,9 +9,22 @@ import HostDashboard from './components/HostDashboard';
 import FacecardSection from './components/FacecardSection';
 import TicketModal from './components/TicketModal';
 import AttendeeNetworkingModal from './components/AttendeeNetworkingModal';
+import InstallPrompt from './components/InstallPrompt';
 import { initialEvents, initialFacecardRequests } from './data/eventsData';
 import { getLocalStore, setLocalStore } from './lib/supabaseClient';
-import { Search, Map, Flame, ShieldAlert, PlusCircle, Sparkles, Compass } from 'lucide-react';
+
+function PageHeader({ eyebrow, title, description, action }) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+      <div>
+        {eyebrow && <p className="eyebrow mb-2">{eyebrow}</p>}
+        <h1 className="text-3xl sm:text-5xl font-bold tracking-[-0.03em] text-white">{title}</h1>
+        {description && <p className="mt-3 text-base sm:text-lg text-text-secondary max-w-xl">{description}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
 
 export default function App() {
   // Persistent state with localStorage fallback
@@ -35,6 +50,10 @@ export default function App() {
   useEffect(() => {
     setLocalStore('pamp_facecards', facecards);
   }, [facecards]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [activePage]);
 
   const handleRSVP = (eventId) => {
     setRsvps((prev) => {
@@ -75,6 +94,12 @@ export default function App() {
     setFacecards((prev) => [req, ...prev]);
   };
 
+  const resetFilters = () => {
+    setActiveCategory('all');
+    setSelectedCity('All Zambia');
+    setSearchQuery('');
+  };
+
   // Filtered Events Logic
   const filteredEvents = events.filter((e) => {
     const matchCategory = activeCategory === 'all' || e.category === activeCategory;
@@ -88,41 +113,36 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen bg-background text-text-primary selection:bg-accent selection:text-white pb-24">
-      {/* Top Navbar */}
-      <Navbar activeSection={activePage} onNavigate={(page) => setActivePage(page)} />
+    <div className="min-h-screen bg-background text-text-primary">
+      <Navbar activeSection={activePage} onNavigate={setActivePage} />
 
-      {/* Main Container with Page View Snapshot feel */}
-      <main className="pt-20 px-4 max-w-7xl mx-auto min-h-[calc(100vh-6rem)]">
-        {/* ================= PAGE 1: EXPLORE EVENTS ================= */}
+      <main className="max-w-6xl mx-auto px-5 md:px-8 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-32 md:pb-20">
         {activePage === 'explore' && (
-          <div className="animate-fade-in space-y-8">
-            {/* Landing Hero Header */}
-            <div className="text-center py-6 max-w-4xl mx-auto">
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-accent text-xs font-bold mb-4 backdrop-blur-md shadow-lg animate-pulse">
-                <Sparkles className="w-4 h-4 text-accent" /> Zambia's Social Event & Networking Hub
-              </div>
-              <h1 className="text-3xl sm:text-5xl font-black tracking-tight mb-4 leading-tight">
-                Discover <span className="bg-clip-text text-transparent" style={{ backgroundImage: 'linear-gradient(135deg, #E040FB, #7C4DFF, #00E5FF)' }}>Events & Mixers</span>
+          <section className="animate-fade-in">
+            <div className="pt-10 pb-10 sm:pt-20 sm:pb-16 text-center">
+              <p className="eyebrow mb-4">Zambia's events & networking hub</p>
+              <h1 className="text-[2.75rem] leading-[1.02] sm:text-7xl font-extrabold tracking-[-0.04em] text-white">
+                Find the party.
+                <br />
+                <span className="brand-text">Meet your people.</span>
               </h1>
-              <p className="text-sm sm:text-base text-text-secondary max-w-2xl mx-auto mb-6">
-                From Afrobeats galas to tech founder mixers and rooftop lounges in Lusaka, Kitwe, and Ndola.
+              <p className="mt-5 text-lg sm:text-xl text-text-secondary max-w-xl mx-auto">
+                Afrobeats galas, founder mixers and rooftop lounges in Lusaka, Kitwe and Ndola.
               </p>
 
-              {/* Search Bar */}
-              <div className="max-w-2xl mx-auto relative">
-                <Search className="w-5 h-5 text-text-secondary absolute left-4 top-3.5" />
+              <div className="relative mt-10 max-w-xl mx-auto">
+                <Search className="w-5 h-5 text-text-muted absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
-                  type="text"
-                  placeholder="Search by event, area (e.g. Kabulonga, Roma), or vibe..."
+                  type="search"
+                  aria-label="Search events"
+                  placeholder="Search events, areas or vibes"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-surface/90 border border-white/15 rounded-2xl pl-12 pr-4 py-3 text-sm text-white focus:outline-none focus:border-accent shadow-xl backdrop-blur-xl"
+                  className="input-dark h-13 pl-12 rounded-full"
                 />
               </div>
             </div>
 
-            {/* Category Filter Bar */}
             <EventFilter
               activeCategory={activeCategory}
               onCategoryChange={setActiveCategory}
@@ -130,9 +150,15 @@ export default function App() {
               onCityChange={setSelectedCity}
             />
 
-            {/* Events Grid */}
+            <div className="flex items-baseline justify-between mt-12 mb-6">
+              <h2 className="text-2xl sm:text-3xl font-bold text-white">All events</h2>
+              <p className="text-sm text-text-muted">
+                {filteredEvents.length} {filteredEvents.length === 1 ? 'event' : 'events'}
+              </p>
+            </div>
+
             {filteredEvents.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-12">
                 {filteredEvents.map((evt) => (
                   <PartyCard
                     key={evt.id}
@@ -140,56 +166,48 @@ export default function App() {
                     onRSVP={handleRSVP}
                     isRSVPed={rsvps.has(evt.id)}
                     onFacecard={() => setActivePage('facecard')}
-                    onGetTickets={(e) => setTicketModalEvent(e)}
-                    onViewAttendees={(e) => setNetworkingModalEvent(e)}
+                    onGetTickets={setTicketModalEvent}
+                    onViewAttendees={setNetworkingModalEvent}
                   />
                 ))}
               </div>
             ) : (
-              <div className="bg-surface/80 border border-white/10 rounded-3xl p-12 text-center max-w-md mx-auto">
-                <p className="text-4xl mb-3">🔍</p>
-                <h3 className="text-lg font-bold text-white mb-1">No matching events found</h3>
-                <p className="text-xs text-text-secondary mb-4">Try adjusting your filters or search term.</p>
-                <button
-                  onClick={() => { setActiveCategory('all'); setSelectedCity('All Zambia'); setSearchQuery(''); }}
-                  className="btn-accent px-4 py-2 text-xs font-bold"
-                >
-                  Reset Filters
+              <div className="card max-w-md mx-auto px-8 py-12 text-center">
+                <span className="mx-auto mb-4 flex w-12 h-12 items-center justify-center rounded-full bg-white/6">
+                  <Search className="w-5 h-5 text-text-secondary" />
+                </span>
+                <h3 className="text-lg font-semibold text-white">No events match</h3>
+                <p className="mt-1 text-text-secondary">Try another area, vibe or category.</p>
+                <button type="button" onClick={resetFilters} className="btn-secondary mt-6">
+                  Clear filters
                 </button>
               </div>
             )}
-          </div>
+          </section>
         )}
 
-        {/* ================= PAGE 2: LIVE MAP VIEW ================= */}
         {activePage === 'map' && (
-          <div className="animate-fade-in space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-black text-white flex items-center gap-2">
-                  📍 Interactive Event Map
-                </h2>
-                <p className="text-xs text-text-secondary">Pinpointed live events across Zambia</p>
-              </div>
-              <button
-                onClick={() => setActivePage('explore')}
-                className="btn-outline px-3 py-1.5 text-xs font-bold"
-              >
-                Back to List View
-              </button>
-            </div>
-
+          <section className="animate-fade-in pt-8 sm:pt-14">
+            <PageHeader
+              eyebrow="Map"
+              title="What's on near you"
+              description="Every event, pinned. Tap a pin for details."
+              action={
+                <button type="button" onClick={() => setActivePage('explore')} className="btn-secondary self-start sm:self-auto">
+                  View as list
+                </button>
+              }
+            />
             <EventMap
               events={filteredEvents}
-              onSelectEvent={(evt) => setNetworkingModalEvent(evt)}
-              onGetTickets={(evt) => setTicketModalEvent(evt)}
+              onSelectEvent={setNetworkingModalEvent}
+              onGetTickets={setTicketModalEvent}
             />
-          </div>
+          </section>
         )}
 
-        {/* ================= PAGE 3: HOST PORTAL ================= */}
         {activePage === 'host' && (
-          <div className="animate-fade-in space-y-6">
+          <section className="animate-fade-in pt-8 sm:pt-14">
             <HostDashboard
               events={events}
               facecards={facecards}
@@ -197,22 +215,16 @@ export default function App() {
               onDeclineFacecard={handleDeclineFacecard}
               onCreateEvent={handleCreateEvent}
             />
-          </div>
+          </section>
         )}
 
-        {/* ================= PAGE 4: FACECARD VIP SECTION ================= */}
         {activePage === 'facecard' && (
-          <div className="animate-fade-in space-y-6">
-            <div className="text-center mb-6">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-bold mb-2">
-                <ShieldAlert className="w-3.5 h-3.5" /> Exclusive Guestlist & VIP Invites
-              </div>
-              <h2 className="text-2xl sm:text-3xl font-black text-white">Facecard VIP Engine</h2>
-              <p className="text-xs text-text-secondary max-w-md mx-auto">
-                Upload your selfie to request exclusive guestlist access from verified hosts.
-              </p>
-            </div>
-
+          <section className="animate-fade-in pt-8 sm:pt-14">
+            <PageHeader
+              eyebrow="Facecard"
+              title="Get on the guest list"
+              description="Send the host a selfie and a note. If they approve, you're in."
+            />
             <FacecardSection
               parties={events}
               facecardRequests={facecards}
@@ -221,70 +233,22 @@ export default function App() {
               }
               onNewRequest={handleNewFacecardRequest}
             />
-          </div>
+          </section>
         )}
       </main>
 
-      {/* ================= FLOATING BOTTOM NAVIGATION BAR ================= */}
-      {/* Positioned fixed at the bottom, never obscured by search bars or content */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md bg-slate-950/90 border border-white/15 rounded-3xl p-1.5 shadow-2xl backdrop-blur-xl flex items-center justify-around">
-        <button
-          onClick={() => setActivePage('explore')}
-          className={`flex-1 py-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all ${
-            activePage === 'explore'
-              ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
-              : 'text-text-secondary hover:text-white'
-          }`}
-        >
-          <Flame className="w-4 h-4" />
-          <span>Events</span>
-        </button>
+      <TabBar active={activePage} onNavigate={setActivePage} />
+      <InstallPrompt />
 
-        <button
-          onClick={() => setActivePage('map')}
-          className={`flex-1 py-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all ${
-            activePage === 'map'
-              ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
-              : 'text-text-secondary hover:text-white'
-          }`}
-        >
-          <Map className="w-4 h-4" />
-          <span>Map</span>
-        </button>
-
-        <button
-          onClick={() => setActivePage('host')}
-          className={`flex-1 py-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all ${
-            activePage === 'host'
-              ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
-              : 'text-text-secondary hover:text-white'
-          }`}
-        >
-          <PlusCircle className="w-4 h-4" />
-          <span>Host</span>
-        </button>
-
-        <button
-          onClick={() => setActivePage('facecard')}
-          className={`flex-1 py-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all ${
-            activePage === 'facecard'
-              ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
-              : 'text-text-secondary hover:text-white'
-          }`}
-        >
-          <ShieldAlert className="w-4 h-4" />
-          <span>Facecard</span>
-        </button>
-      </div>
-
-      {/* ================= MODALS ================= */}
       <TicketModal
+        key={`ticket-${ticketModalEvent?.id}`}
         event={ticketModalEvent}
         isOpen={Boolean(ticketModalEvent)}
         onClose={() => setTicketModalEvent(null)}
       />
 
       <AttendeeNetworkingModal
+        key={`attendees-${networkingModalEvent?.id}`}
         event={networkingModalEvent}
         isOpen={Boolean(networkingModalEvent)}
         onClose={() => setNetworkingModalEvent(null)}
