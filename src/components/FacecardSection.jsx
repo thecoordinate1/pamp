@@ -1,12 +1,18 @@
 import { useState } from 'react';
 import { Camera, CheckCircle2, MapPin, MessageCircle } from 'lucide-react';
+import { useAuth } from '../lib/authContext';
+import { uploadSelfie } from '../lib/storage';
 
 const CONFETTI_COLORS = ['#E040FB', '#7C4DFF', '#F3B8FC', '#FFFFFF'];
 
 export default function FacecardSection({ parties, facecardRequests, onUpdateRequest, onNewRequest }) {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('request');
   const [selectedParty, setSelectedParty] = useState('');
   const [selfiePreview, setSelfiePreview] = useState(null);
+  const [selfieFile, setSelfieFile] = useState(null);
+  const [uploadError, setUploadError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [guestName, setGuestName] = useState('');
   const [guestMessage, setGuestMessage] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -16,32 +22,49 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
 
   const handleSelfieChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setSelfiePreview(reader.result);
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    setUploadError('');
+    // Keep the File itself: the preview is only for display, the upload needs this.
+    setSelfieFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setSelfiePreview(reader.result);
+    reader.readAsDataURL(file);
   };
 
-  const handleSubmitRequest = (e) => {
+  const handleSubmitRequest = async (e) => {
     e.preventDefault();
-    if (!selectedParty || !guestName.trim()) return;
+    if (!selectedParty || !guestName.trim() || isSubmitting) return;
 
-    onNewRequest({
-      id: Date.now(),
-      partyId: selectedParty,
-      name: guestName,
-      selfieUrl: selfiePreview || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop&crop=face',
-      status: 'pending',
-      message: guestMessage || 'I would love to come! 🙏',
-    });
+    setUploadError('');
+    setIsSubmitting(true);
+    try {
+      // The selfie goes to the private `selfies` bucket under the user's own
+      // folder; only the path is stored on the request.
+      let selfiePath = null;
+      if (selfieFile && user?.id) {
+        selfiePath = await uploadSelfie(selfieFile, user.id);
+      }
 
-    setSubmitted(true);
-    setGuestName('');
-    setGuestMessage('');
-    setSelfiePreview(null);
-    setSelectedParty('');
-    setTimeout(() => setSubmitted(false), 4000);
+      onNewRequest({
+        partyId: selectedParty,
+        name: guestName,
+        selfiePath,
+        status: 'pending',
+        message: guestMessage || 'I would love to come! 🙏',
+      });
+
+      setSubmitted(true);
+      setGuestName('');
+      setGuestMessage('');
+      setSelfiePreview(null);
+      setSelfieFile(null);
+      setSelectedParty('');
+      setTimeout(() => setSubmitted(false), 4000);
+    } catch (err) {
+      setUploadError(err.message ?? 'Could not upload that photo. Try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleApprove = (requestId) => {
@@ -132,7 +155,7 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
               {selfiePreview ? (
                 <button
                   type="button"
-                  onClick={() => setSelfiePreview(null)}
+                  onClick={() => { setSelfiePreview(null); setSelfieFile(null); }}
                   className="mt-3 text-sm font-medium text-text-secondary hover:text-white"
                 >
                   Remove photo
@@ -183,9 +206,15 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
               />
             </div>
 
-            <button type="submit" className="btn-accent w-full">
-              Send request
+            <button type="submit" disabled={isSubmitting} className="btn-accent w-full">
+              {isSubmitting ? 'Sending...' : 'Send request'}
             </button>
+
+            {uploadError && (
+              <p role="alert" className="text-center text-sm text-red">
+                {uploadError}
+              </p>
+            )}
 
             {submitted && (
               <p role="status" className="flex items-center justify-center gap-2 text-sm font-medium text-green animate-fade-in">

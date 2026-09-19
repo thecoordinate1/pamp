@@ -30,6 +30,7 @@ export const keys = {
   requests: (id) => ['events', id, 'requests'],
   myRsvps: ['me', 'rsvps'],
   myProfile: ['me', 'profile'],
+  myTickets: ['me', 'tickets'],
 };
 
 export function useEvents() {
@@ -228,5 +229,62 @@ export function useMyProfile(userId) {
       );
       return rows[0] ?? null;
     },
+  });
+}
+
+// Ordering runs through a SECURITY DEFINER function: clients can read orders and
+// tickets but never write them, so price, fees and paid status are set by the
+// database rather than trusted from the browser.
+export function useCreateOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ eventId, quantity, method, msisdn }) => {
+      const { data, error } = await supabase.rpc('create_order', {
+        p_event_id: eventId,
+        p_quantity: quantity,
+        p_method: method ?? 'free',
+        p_msisdn: msisdn ?? null,
+      });
+      if (error) throw error;
+      return Array.isArray(data) ? data[0] : data;
+    },
+    onSuccess: (order) => {
+      qc.invalidateQueries({ queryKey: keys.myTickets });
+      qc.invalidateQueries({ queryKey: keys.myRsvps });
+      qc.invalidateQueries({ queryKey: keys.events });
+      if (order?.event_id) {
+        qc.invalidateQueries({ queryKey: keys.attendees(order.event_id) });
+      }
+    },
+  });
+}
+
+export function useOrderTickets(orderId) {
+  return useQuery({
+    queryKey: ['orders', orderId, 'tickets'],
+    enabled: Boolean(orderId),
+    queryFn: async () =>
+      unwrap(
+        await supabase
+          .from('tickets')
+          .select('id, code, status, event_id, order_id')
+          .eq('order_id', orderId)
+          .order('created_at', { ascending: true })
+      ),
+  });
+}
+
+export function useMyTickets(userId) {
+  return useQuery({
+    queryKey: keys.myTickets,
+    enabled: Boolean(userId),
+    queryFn: async () =>
+      unwrap(
+        await supabase
+          .from('tickets')
+          .select('id, code, status, checked_in_at, events:event_id (id, name, starts_on, start_time, area, image_url)')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+      ),
   });
 }

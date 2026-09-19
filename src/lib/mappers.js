@@ -3,7 +3,11 @@
 // components never have to know which side they are talking to.
 
 export const ngweeToZmw = (ngwee) => (ngwee ?? 0) / 100;
-export const zmwToNgwee = (zmw) => Math.round((Number(zmw) || 0) * 100);
+// Multiplying by 100 in binary floating point can land just under a half ngwee
+// (1.005 * 100 === 100.49999999999999), which would round the wrong way. Snap to
+// a sane precision first so a price rounds the way someone reading it expects.
+export const zmwToNgwee = (zmw) =>
+  Math.round(Number(((Number(zmw) || 0) * 100).toFixed(4)));
 
 export function rowToEvent(row) {
   if (!row) return null;
