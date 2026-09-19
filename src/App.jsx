@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import Navbar from './components/Navbar';
 import TabBar from './components/TabBar';
@@ -10,8 +10,17 @@ import FacecardSection from './components/FacecardSection';
 import TicketModal from './components/TicketModal';
 import AttendeeNetworkingModal from './components/AttendeeNetworkingModal';
 import InstallPrompt from './components/InstallPrompt';
-import { initialEvents, initialFacecardRequests } from './data/eventsData';
-import { getLocalStore, setLocalStore } from './lib/supabaseClient';
+import SignInSheet from './components/SignInSheet';
+import { useAuth } from './lib/authContext';
+import {
+  useCreateEvent,
+  useCreateGuestRequest,
+  useDecideGuestRequest,
+  useEvents,
+  useGuestRequests,
+  useMyRsvps,
+  useToggleRsvp,
+} from './lib/queries';
 
 function PageHeader({ eyebrow, title, description, action }) {
   return (
@@ -26,11 +35,41 @@ function PageHeader({ eyebrow, title, description, action }) {
   );
 }
 
+function StateCard({ title, body, action }) {
+  return (
+    <div className="card max-w-md mx-auto px-8 py-12 text-center">
+      <span className="mx-auto mb-4 flex w-12 h-12 items-center justify-center rounded-full bg-white/6">
+        <Search className="w-5 h-5 text-text-secondary" />
+      </span>
+      <h3 className="text-lg font-semibold text-white">{title}</h3>
+      <p className="mt-1 text-text-secondary">{body}</p>
+      {action}
+    </div>
+  );
+}
+
+function CardSkeleton() {
+  return (
+    <div className="card overflow-hidden" aria-hidden="true">
+      <div className="h-44 bg-white/5 animate-pulse" />
+      <div className="p-5 space-y-3">
+        <div className="h-3 w-24 rounded-full bg-white/5 animate-pulse" />
+        <div className="h-5 w-3/4 rounded-full bg-white/5 animate-pulse" />
+        <div className="h-3 w-1/2 rounded-full bg-white/5 animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  // Persistent state with localStorage fallback
-  const [events, setEvents] = useState(() => getLocalStore('pamp_events', initialEvents));
-  const [facecards, setFacecards] = useState(() => getLocalStore('pamp_facecards', initialFacecardRequests));
-  const [rsvps, setRsvps] = useState(new Set());
+  const { user } = useAuth();
+
+  const { data: events = [], isLoading, isError, error } = useEvents();
+  const { data: rsvps = new Set() } = useMyRsvps(user?.id);
+  const toggleRsvp = useToggleRsvp(user?.id);
+  const createEvent = useCreateEvent(user?.id);
+  const createGuestRequest = useCreateGuestRequest(user?.id);
+  const decideGuestRequest = useDecideGuestRequest();
 
   // Page Navigation State: 'explore' | 'map' | 'host' | 'facecard'
   const [activePage, setActivePage] = useState('explore');
@@ -41,58 +80,46 @@ export default function App() {
   // Modals
   const [ticketModalEvent, setTicketModalEvent] = useState(null);
   const [networkingModalEvent, setNetworkingModalEvent] = useState(null);
-
-  // Persist state updates
-  useEffect(() => {
-    setLocalStore('pamp_events', events);
-  }, [events]);
-
-  useEffect(() => {
-    setLocalStore('pamp_facecards', facecards);
-  }, [facecards]);
+  const [signInFor, setSignInFor] = useState(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [activePage]);
 
-  const handleRSVP = (eventId) => {
-    setRsvps((prev) => {
-      const next = new Set(prev);
-      if (next.has(eventId)) {
-        next.delete(eventId);
-        setEvents((list) =>
-          list.map((e) => (e.id === eventId ? { ...e, rsvpCount: Math.max(0, e.rsvpCount - 1) } : e))
-        );
-      } else {
-        next.add(eventId);
-        setEvents((list) =>
-          list.map((e) => (e.id === eventId ? { ...e, rsvpCount: e.rsvpCount + 1 } : e))
-        );
-      }
-      return next;
-    });
+  // Events this user hosts, and the guest requests waiting on them.
+  const myEvents = useMemo(
+    () => (user ? events.filter((e) => e.hostId === user.id) : []),
+    [events, user]
+  );
+  const myEventIds = useMemo(() => myEvents.map((e) => e.id), [myEvents]);
+  const { data: guestRequests = [] } = useGuestRequests(myEventIds);
+
+  // Browsing is open to everyone; anything that writes needs an account.
+  const requireAuth = (action, fn) => (...args) => {
+    if (!user) {
+      setSignInFor(action);
+      return;
+    }
+    fn(...args);
   };
 
-  const handleCreateEvent = (newEvent) => {
-    setEvents((prev) => [newEvent, ...prev]);
-    setActivePage('explore');
-  };
+  const handleRSVP = requireAuth('RSVP', (eventId) =>
+    toggleRsvp.mutate({ eventId, isAttending: rsvps.has(eventId) })
+  );
 
-  const handleApproveFacecard = (id) => {
-    setFacecards((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, status: 'approved' } : f))
-    );
-  };
+  const handleCreateEvent = requireAuth('host an event', (newEvent) =>
+    createEvent.mutate(newEvent, { onSuccess: () => setActivePage('explore') })
+  );
 
-  const handleDeclineFacecard = (id) => {
-    setFacecards((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, status: 'declined' } : f))
-    );
-  };
+  const handleNewFacecardRequest = requireAuth('request a facecard', (req) =>
+    createGuestRequest.mutate({
+      eventId: req.partyId,
+      reason: req.message ?? req.reason,
+      selfiePath: req.selfiePath ?? null,
+    })
+  );
 
-  const handleNewFacecardRequest = (req) => {
-    setFacecards((prev) => [req, ...prev]);
-  };
+  const handleGetTickets = requireAuth('get a pass', (evt) => setTicketModalEvent(evt));
 
   const resetFilters = () => {
     setActiveCategory('all');
@@ -100,7 +127,6 @@ export default function App() {
     setSearchQuery('');
   };
 
-  // Filtered Events Logic
   const filteredEvents = events.filter((e) => {
     const matchCategory = activeCategory === 'all' || e.category === activeCategory;
     const matchCity = selectedCity === 'All Zambia' || e.city === selectedCity || e.area.includes(selectedCity);
@@ -120,7 +146,7 @@ export default function App() {
         {activePage === 'explore' && (
           <section className="animate-fade-in">
             <div className="pt-10 pb-10 sm:pt-20 sm:pb-16 text-center">
-              <p className="eyebrow mb-4">Zambia's events & networking hub</p>
+              <p className="eyebrow mb-4">Zambia&apos;s events &amp; networking hub</p>
               <h1 className="text-[2.75rem] leading-[1.02] sm:text-7xl font-extrabold tracking-[-0.04em] text-white">
                 Find the party.
                 <br />
@@ -152,12 +178,30 @@ export default function App() {
 
             <div className="flex items-baseline justify-between mt-12 mb-6">
               <h2 className="text-2xl sm:text-3xl font-bold text-white">All events</h2>
-              <p className="text-sm text-text-muted">
-                {filteredEvents.length} {filteredEvents.length === 1 ? 'event' : 'events'}
-              </p>
+              {!isLoading && !isError && (
+                <p className="text-sm text-text-muted">
+                  {filteredEvents.length} {filteredEvents.length === 1 ? 'event' : 'events'}
+                </p>
+              )}
             </div>
 
-            {filteredEvents.length > 0 ? (
+            {isLoading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-12">
+                {[0, 1, 2].map((i) => (
+                  <CardSkeleton key={i} />
+                ))}
+              </div>
+            ) : isError ? (
+              <StateCard
+                title="Couldn't load events"
+                body={error?.message ?? 'Check your connection and try again.'}
+                action={
+                  <button type="button" onClick={() => window.location.reload()} className="btn-secondary mt-6">
+                    Try again
+                  </button>
+                }
+              />
+            ) : filteredEvents.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-12">
                 {filteredEvents.map((evt) => (
                   <PartyCard
@@ -166,22 +210,31 @@ export default function App() {
                     onRSVP={handleRSVP}
                     isRSVPed={rsvps.has(evt.id)}
                     onFacecard={() => setActivePage('facecard')}
-                    onGetTickets={setTicketModalEvent}
+                    onGetTickets={handleGetTickets}
                     onViewAttendees={setNetworkingModalEvent}
                   />
                 ))}
               </div>
+            ) : events.length === 0 ? (
+              <StateCard
+                title="No events yet"
+                body="Nothing has been posted yet. Be the first to host one."
+                action={
+                  <button type="button" onClick={() => setActivePage('host')} className="btn-accent mt-6">
+                    Host an event
+                  </button>
+                }
+              />
             ) : (
-              <div className="card max-w-md mx-auto px-8 py-12 text-center">
-                <span className="mx-auto mb-4 flex w-12 h-12 items-center justify-center rounded-full bg-white/6">
-                  <Search className="w-5 h-5 text-text-secondary" />
-                </span>
-                <h3 className="text-lg font-semibold text-white">No events match</h3>
-                <p className="mt-1 text-text-secondary">Try another area, vibe or category.</p>
-                <button type="button" onClick={resetFilters} className="btn-secondary mt-6">
-                  Clear filters
-                </button>
-              </div>
+              <StateCard
+                title="No events match"
+                body="Try another area, vibe or category."
+                action={
+                  <button type="button" onClick={resetFilters} className="btn-secondary mt-6">
+                    Clear filters
+                  </button>
+                }
+              />
             )}
           </section>
         )}
@@ -191,7 +244,7 @@ export default function App() {
             <PageHeader
               eyebrow="Map"
               title="What's on near you"
-              description="Every event, pinned. Tap a pin for details."
+              description="Every event, pinned to its neighbourhood. Tap a pin for details."
               action={
                 <button type="button" onClick={() => setActivePage('explore')} className="btn-secondary self-start sm:self-auto">
                   View as list
@@ -201,20 +254,32 @@ export default function App() {
             <EventMap
               events={filteredEvents}
               onSelectEvent={setNetworkingModalEvent}
-              onGetTickets={setTicketModalEvent}
+              onGetTickets={handleGetTickets}
             />
           </section>
         )}
 
         {activePage === 'host' && (
           <section className="animate-fade-in pt-8 sm:pt-14">
-            <HostDashboard
-              events={events}
-              facecards={facecards}
-              onApproveFacecard={handleApproveFacecard}
-              onDeclineFacecard={handleDeclineFacecard}
-              onCreateEvent={handleCreateEvent}
-            />
+            {user ? (
+              <HostDashboard
+                events={myEvents}
+                facecards={guestRequests}
+                onApproveFacecard={(id) => decideGuestRequest.mutate({ id, status: 'approved' })}
+                onDeclineFacecard={(id) => decideGuestRequest.mutate({ id, status: 'declined' })}
+                onCreateEvent={handleCreateEvent}
+              />
+            ) : (
+              <StateCard
+                title="Sign in to host"
+                body="Create an account to post events and manage your guest list."
+                action={
+                  <button type="button" onClick={() => setSignInFor('host an event')} className="btn-accent mt-6">
+                    Sign in
+                  </button>
+                }
+              />
+            )}
           </section>
         )}
 
@@ -227,10 +292,8 @@ export default function App() {
             />
             <FacecardSection
               parties={events}
-              facecardRequests={facecards}
-              onUpdateRequest={(id, status) =>
-                status === 'approved' ? handleApproveFacecard(id) : handleDeclineFacecard(id)
-              }
+              facecardRequests={guestRequests}
+              onUpdateRequest={(id, status) => decideGuestRequest.mutate({ id, status })}
               onNewRequest={handleNewFacecardRequest}
             />
           </section>
@@ -252,6 +315,12 @@ export default function App() {
         event={networkingModalEvent}
         isOpen={Boolean(networkingModalEvent)}
         onClose={() => setNetworkingModalEvent(null)}
+      />
+
+      <SignInSheet
+        open={Boolean(signInFor)}
+        action={signInFor ?? 'continue'}
+        onClose={() => setSignInFor(null)}
       />
     </div>
   );

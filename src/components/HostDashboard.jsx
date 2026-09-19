@@ -45,7 +45,7 @@ export default function HostDashboard({
     userRole: r.userRole || '',
     userInstagram: r.userInstagram || '',
     reason: r.reason || r.message || '',
-    eventTitle: r.eventTitle || events.find((e) => e.id === r.partyId)?.name || 'an event',
+    eventTitle: r.eventTitle || events.find((e) => e.id === (r.eventId ?? r.partyId))?.name || 'an event',
   }));
   const pendingFacecards = requests.filter(f => f.status === 'pending');
 

@@ -29,7 +29,7 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
 
     onNewRequest({
       id: Date.now(),
-      partyId: parseInt(selectedParty),
+      partyId: selectedParty,
       name: guestName,
       selfieUrl: selfiePreview || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop&crop=face',
       status: 'pending',
@@ -62,7 +62,7 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
       ...r,
       name,
       message: r.message || r.reason || '',
-      partyId: r.partyId ?? parties.find((p) => p.name === r.eventTitle)?.id,
+      partyId: r.eventId ?? r.partyId,
       selfieUrl:
         r.selfieUrl ||
         `data:image/svg+xml,${encodeURIComponent(
@@ -73,7 +73,7 @@ export default function FacecardSection({ parties, facecardRequests, onUpdateReq
 
   const filteredRequests = hostPartyFilter === 'all'
     ? requests
-    : requests.filter(r => r.partyId === parseInt(hostPartyFilter));
+    : requests.filter(r => r.partyId === hostPartyFilter);
 
   const pendingCount = requests.filter(r => r.status === 'pending').length;
   const approvedRequests = requests.filter(
