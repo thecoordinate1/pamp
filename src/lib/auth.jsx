@@ -39,6 +39,24 @@ export function AuthProvider({ children }) {
           provider: 'google',
           options: { redirectTo: window.location.origin },
         }),
+      // Confirmation is on, so signUp returns a user with no session until the
+      // emailed link is clicked. The caller uses that to decide what to show.
+      signUpWithEmail: (email, password) =>
+        supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: window.location.origin },
+        }),
+      signInWithEmail: (email, password) =>
+        supabase.auth.signInWithPassword({ email, password }),
+      resendConfirmation: (email) =>
+        supabase.auth.resend({
+          type: 'signup',
+          email,
+          options: { emailRedirectTo: window.location.origin },
+        }),
+      resetPassword: (email) =>
+        supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
       signOut: () => supabase.auth.signOut(),
     }),
     [session, loading]
