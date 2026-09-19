@@ -24,3 +24,6 @@ supabase/.branches/
 # OS
 .DS_Store
 Thumbs.db
+
+# MCP config (contains access token)
+.mcp.json
