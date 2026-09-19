@@ -361,3 +361,56 @@ export function useEventTickets(eventIds) {
       ),
   });
 }
+
+// The admin flag lives on account_private, which useMyProfile does not read.
+// RLS lets a user read their own row, so no special privilege is needed here.
+export function useIsAdmin(userId) {
+  return useQuery({
+    queryKey: ['me', 'is-admin'],
+    enabled: Boolean(userId),
+    queryFn: async () => {
+      const rows = unwrap(
+        await supabase.from('account_private').select('is_admin').eq('user_id', userId).limit(1)
+      );
+      return Boolean(rows[0]?.is_admin);
+    },
+  });
+}
+
+// These three raise 'Admins only' for anyone else, so they are only enabled
+// once the flag has come back true.
+export function usePlatformStats(enabled) {
+  return useQuery({
+    queryKey: ['admin', 'stats'],
+    enabled: Boolean(enabled),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('platform_stats');
+      if (error) throw error;
+      return Array.isArray(data) ? data[0] : data;
+    },
+  });
+}
+
+export function usePlatformEvents(enabled) {
+  return useQuery({
+    queryKey: ['admin', 'events'],
+    enabled: Boolean(enabled),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('platform_event_breakdown');
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+export function usePlatformSignups(enabled, days = 30) {
+  return useQuery({
+    queryKey: ['admin', 'signups', days],
+    enabled: Boolean(enabled),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('platform_signups', { p_days: days });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}

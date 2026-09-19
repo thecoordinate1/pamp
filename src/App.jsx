@@ -12,6 +12,7 @@ import AttendeeNetworkingModal from './components/AttendeeNetworkingModal';
 import InstallPrompt from './components/InstallPrompt';
 import SignInSheet from './components/SignInSheet';
 import ProfileSheet from './components/ProfileSheet';
+import AdminDashboard from './components/AdminDashboard';
 import { useAuth } from './lib/authContext';
 import {
   useCreateEvent,
@@ -19,6 +20,7 @@ import {
   useDecideGuestRequest,
   useEvents,
   useGuestRequests,
+  useIsAdmin,
   useMyRsvps,
   useToggleRsvp,
 } from './lib/queries';
@@ -67,6 +69,7 @@ export default function App() {
 
   const { data: events = [], isLoading, isError, error } = useEvents();
   const { data: rsvps = new Set() } = useMyRsvps(user?.id);
+  const { data: isAdmin = false } = useIsAdmin(user?.id);
   const toggleRsvp = useToggleRsvp(user?.id);
   const createEvent = useCreateEvent(user?.id);
   const createGuestRequest = useCreateGuestRequest(user?.id);
@@ -305,6 +308,28 @@ export default function App() {
             />
           </section>
         )}
+        {activePage === 'admin' && (
+          <section className="animate-fade-in pt-8 sm:pt-14">
+            <PageHeader
+              eyebrow="Admin"
+              title="Platform overview"
+              description="Everything happening across PAMP."
+            />
+            {isAdmin ? (
+              <AdminDashboard />
+            ) : (
+              <StateCard
+                title="Not available"
+                body="This area is for platform admins."
+                action={
+                  <button type="button" onClick={() => setActivePage('explore')} className="btn-secondary mt-6">
+                    Back to events
+                  </button>
+                }
+              />
+            )}
+          </section>
+        )}
       </main>
 
       <TabBar active={activePage} onNavigate={setActivePage} />
@@ -330,7 +355,12 @@ export default function App() {
         onClose={() => setSignInFor(null)}
       />
 
-      <ProfileSheet open={profileOpen} onClose={() => setProfileOpen(false)} />
+      <ProfileSheet
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        isAdmin={isAdmin}
+        onNavigate={setActivePage}
+      />
     </div>
   );
 }

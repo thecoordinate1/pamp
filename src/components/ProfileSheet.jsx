@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LogOut } from 'lucide-react';
+import { BarChart3, LogOut } from 'lucide-react';
 import Sheet from './Sheet';
 import { useAuth } from '../lib/authContext';
 import { useMyProfile, useUpdateProfile } from '../lib/queries';
@@ -16,7 +16,7 @@ const PLATFORMS = [
 // Mirrors the check constraint on profiles.social_handle.
 const HANDLE_RE = /^[A-Za-z0-9._+-]{1,40}$/;
 
-export default function ProfileSheet({ open, onClose }) {
+export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigate }) {
   const { user, signOut } = useAuth();
   const { data: profile, isLoading } = useMyProfile(user?.id);
   const updateProfile = useUpdateProfile(user?.id);
@@ -178,6 +178,17 @@ export default function ProfileSheet({ open, onClose }) {
 
           {error && <p role="alert" className="text-sm text-red">{error}</p>}
           {saved && !error && <p role="status" className="text-sm text-green">Saved.</p>}
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => { onNavigate?.('admin'); onClose(); }}
+              className="btn-secondary w-full"
+            >
+              <BarChart3 className="w-4 h-4" />
+              Platform admin
+            </button>
+          )}
         </form>
       )}
     </Sheet>
