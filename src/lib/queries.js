@@ -288,3 +288,32 @@ export function useMyTickets(userId) {
       ),
   });
 }
+
+// The protect_profile_columns trigger blocks id, host_status and created_at for
+// ordinary callers, so only the fields a person owns are sent here.
+export function useUpdateProfile(userId) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (fields) => {
+      const rows = unwrap(
+        await supabase
+          .from('profiles')
+          .update({
+            display_name: fields.displayName ?? '',
+            headline: fields.headline ?? '',
+            looking_for: fields.lookingFor ?? '',
+            social_platform: fields.socialPlatform || null,
+            social_handle: fields.socialHandle ? fields.socialHandle.replace(/^@/, '') : null,
+          })
+          .eq('id', userId)
+          .select('id, display_name, headline, looking_for, social_platform, social_handle, avatar_path, host_status')
+      );
+      return rows[0] ?? null;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.myProfile });
+      // Attendee lists render these fields, so they are now stale.
+      qc.invalidateQueries({ queryKey: ['events'] });
+    },
+  });
+}

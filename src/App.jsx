@@ -11,6 +11,7 @@ import TicketModal from './components/TicketModal';
 import AttendeeNetworkingModal from './components/AttendeeNetworkingModal';
 import InstallPrompt from './components/InstallPrompt';
 import SignInSheet from './components/SignInSheet';
+import ProfileSheet from './components/ProfileSheet';
 import { useAuth } from './lib/authContext';
 import {
   useCreateEvent,
@@ -81,6 +82,7 @@ export default function App() {
   const [ticketModalEvent, setTicketModalEvent] = useState(null);
   const [networkingModalEvent, setNetworkingModalEvent] = useState(null);
   const [signInFor, setSignInFor] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -140,7 +142,12 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-text-primary">
-      <Navbar activeSection={activePage} onNavigate={setActivePage} />
+      <Navbar
+        activeSection={activePage}
+        onNavigate={setActivePage}
+        onOpenProfile={() => setProfileOpen(true)}
+        onSignIn={() => setSignInFor('continue')}
+      />
 
       <main className="max-w-6xl mx-auto px-5 md:px-8 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-32 md:pb-20">
         {activePage === 'explore' && (
@@ -322,6 +329,8 @@ export default function App() {
         action={signInFor ?? 'continue'}
         onClose={() => setSignInFor(null)}
       />
+
+      <ProfileSheet open={profileOpen} onClose={() => setProfileOpen(false)} />
     </div>
   );
 }
