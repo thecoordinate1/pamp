@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { CheckCircle2, QrCode } from 'lucide-react';
+import CheckInSheet from './CheckInSheet';
+import { useAuth } from '../lib/authContext';
+import { uploadEventImage } from '../lib/storage';
+import { ImagePlus, QrCode } from 'lucide-react';
 
 const TABS = [
   { id: 'facecards', label: 'Requests' },
@@ -15,7 +18,11 @@ export default function HostDashboard({
   onCreateEvent
 }) {
   const [activeTab, setActiveTab] = useState('facecards'); // 'facecards' | 'events' | 'create'
-  const [scannedResult, setScannedResult] = useState(null);
+  const { user } = useAuth();
+  const [checkInOpen, setCheckInOpen] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [isPublishing, setIsPublishing] = useState(false);
   const [formError, setFormError] = useState('');
 
   // New Event Form state
@@ -49,34 +56,42 @@ export default function HostDashboard({
   }));
   const pendingFacecards = requests.filter(f => f.status === 'pending');
 
-  const handleCreateSubmit = (e) => {
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setFormError('');
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setImagePreview(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleCreateSubmit = async (e) => {
     e.preventDefault();
     if (!newEvent.name || !newEvent.date || !newEvent.area) {
       setFormError('Add a title, date and area to publish.');
       return;
     }
-
-    const created = {
-      ...newEvent,
-      id: Date.now(),
-      coordinates: [-15.416, 28.322],
-      rsvpCount: 0,
-      vibeScore: 100,
-      attendees: []
-    };
+    if (isPublishing) return;
 
     setFormError('');
-    onCreateEvent(created);
+    setIsPublishing(true);
+    try {
+      // Artwork goes to the public event-images bucket; the row stores its URL.
+      let image = newEvent.image;
+      if (imageFile && user?.id) {
+        image = await uploadEventImage(imageFile, user.id);
+      }
+      onCreateEvent({ ...newEvent, image });
+      setImageFile(null);
+      setImagePreview(null);
+    } catch (err) {
+      setFormError(err.message ?? 'Could not upload that image. Try another one.');
+    } finally {
+      setIsPublishing(false);
+    }
   };
 
-  const simulateScan = () => {
-    const fakePasses = [
-      { name: 'Kambole C.', ticketId: 'PAMP-TIX-924182', status: 'Valid pass', type: 'VIP entry' },
-      { name: 'Chileshe K.', ticketId: 'PAMP-TIX-104928', status: 'Valid pass', type: 'Standard entry' },
-    ];
-    const pass = fakePasses[Math.floor(Math.random() * fakePasses.length)];
-    setScannedResult(pass);
-  };
 
   const stats = [
     { label: 'Events', value: events.length },
@@ -94,7 +109,7 @@ export default function HostDashboard({
           <h1 className="text-3xl sm:text-5xl font-bold tracking-[-0.03em] text-white">Your events</h1>
           <p className="mt-3 text-base sm:text-lg text-text-secondary">Guest list approvals, events and door check-in.</p>
         </div>
-        <button type="button" onClick={simulateScan} className="btn-secondary self-start sm:self-auto">
+        <button type="button" onClick={() => setCheckInOpen(true)} className="btn-secondary self-start sm:self-auto">
           <QrCode className="w-4 h-4" />
           Scan pass
         </button>
@@ -112,22 +127,7 @@ export default function HostDashboard({
         ))}
       </dl>
 
-      {scannedResult && (
-        <div className="card mb-8 flex items-center gap-4 p-4 sm:p-5 border-green/25 bg-green/5 animate-fade-in" role="status">
-          <CheckCircle2 className="w-7 h-7 text-green shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-white">
-              {scannedResult.status} · {scannedResult.type}
-            </p>
-            <p className="text-sm text-text-secondary truncate">
-              {scannedResult.name} · {scannedResult.ticketId}
-            </p>
-          </div>
-          <button type="button" onClick={() => setScannedResult(null)} className="text-sm font-medium text-text-secondary hover:text-white">
-            Dismiss
-          </button>
-        </div>
-      )}
+      <CheckInSheet open={checkInOpen} onClose={() => setCheckInOpen(false)} />
 
       <div role="tablist" aria-label="Host sections" className="segmented max-w-md mb-8">
         {TABS.map(({ id, label }) => (
@@ -225,6 +225,40 @@ export default function HostDashboard({
                 onChange={update('name')}
                 className="input-dark"
               />
+            </div>
+
+            <div className="sm:col-span-2">
+              <span className="field-label">Event artwork</span>
+              <div className="flex items-center gap-4">
+                <label className="relative cursor-pointer group shrink-0" aria-label="Upload event artwork">
+                  <span className={`flex w-28 h-20 items-center justify-center overflow-hidden rounded-2xl transition-colors duration-200 ${
+                    imagePreview
+                      ? 'shadow-[0_0_0_2px_#E040FB]'
+                      : 'bg-white/5 border border-dashed border-white/20 group-hover:border-accent/60'
+                  }`}>
+                    {imagePreview ? (
+                      <img src={imagePreview} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <ImagePlus className="w-6 h-6 text-text-secondary" />
+                    )}
+                  </span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleImageChange} />
+                </label>
+                <div className="min-w-0">
+                  <p className="text-sm text-text-secondary">
+                    {imageFile ? imageFile.name : 'JPEG, PNG or WebP, up to 5MB.'}
+                  </p>
+                  {imagePreview && (
+                    <button
+                      type="button"
+                      onClick={() => { setImageFile(null); setImagePreview(null); }}
+                      className="mt-1 text-sm font-medium text-text-secondary hover:text-white"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div>

@@ -317,3 +317,47 @@ export function useUpdateProfile(userId) {
     },
   });
 }
+
+// Check-in goes through a SECURITY DEFINER function because clients hold only
+// SELECT on tickets. The function verifies the caller hosts the event.
+export function useCheckInTicket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (code) => {
+      const { data, error } = await supabase.rpc('check_in_ticket', { p_code: code });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) throw new Error('No pass with that code');
+      return row;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['event-tickets'] }),
+  });
+}
+
+export function useUndoCheckIn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (code) => {
+      const { data, error } = await supabase.rpc('undo_check_in', { p_code: code });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['event-tickets'] }),
+  });
+}
+
+// Hosts can read tickets for their own events, so the door list is a plain query.
+export function useEventTickets(eventIds) {
+  return useQuery({
+    queryKey: ['event-tickets', eventIds],
+    enabled: Array.isArray(eventIds) && eventIds.length > 0,
+    queryFn: async () =>
+      unwrap(
+        await supabase
+          .from('tickets')
+          .select(`id, code, status, checked_in_at, event_id, user_id, ${PROFILE_EMBED}`)
+          .in('event_id', eventIds)
+          .order('created_at', { ascending: false })
+      ),
+  });
+}
