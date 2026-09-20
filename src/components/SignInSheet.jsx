@@ -120,7 +120,7 @@ export default function SignInSheet({ open, onClose, action = 'continue' }) {
     return (
       <Sheet open={open} onClose={close} title="Sign in to PAMP">
         <p className="rounded-2xl bg-red/10 px-4 py-3 text-sm text-red">
-          Sign-in is not configured yet. Add your Supabase keys to .env.local.
+          Sign-in is temporarily unavailable. Please try again shortly.
         </p>
       </Sheet>
     );

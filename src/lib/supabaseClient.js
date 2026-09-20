@@ -7,6 +7,16 @@ export const isSupabaseConfigured = Boolean(
   import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+if (!isSupabaseConfigured) {
+  // Vite inlines VITE_* at build time, so a deployment missing these keeps the
+  // placeholders until it is rebuilt. Setting them on the host is not enough on
+  // its own: the build has to run again afterwards.
+  console.error(
+    'PAMP: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing from this build. ' +
+      'Set them in your hosting provider's environment variables, then redeploy.'
+  );
+}
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Helper function for local persistence fallback
