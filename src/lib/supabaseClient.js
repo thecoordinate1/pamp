@@ -13,7 +13,7 @@ if (!isSupabaseConfigured) {
   // its own: the build has to run again afterwards.
   console.error(
     'PAMP: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing from this build. ' +
-      'Set them in your hosting provider's environment variables, then redeploy.'
+      'Set them in the hosting environment variables, then redeploy.'
   );
 }
 
