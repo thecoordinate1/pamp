@@ -1,10 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder-supabase-url.supabase.co';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+// Environment variables win when present, so staging or a different project
+// only needs VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY set.
+//
+// The fallbacks below are the production project's URL and PUBLISHABLE key.
+// That key is designed to be public: it ships in this bundle either way, and
+// row-level security is what actually protects the data. Never put the
+// sb_secret_ key here, or in any VITE_ variable: it bypasses RLS entirely.
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || 'https://lbtdkswtfcyyxsqhrdjb.supabase.co';
+const SUPABASE_ANON_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_C6BUjhd9GSIKDtYUxhQMlw_8XUZyhp4';
 
 export const isSupabaseConfigured = Boolean(
-  import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
+  SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes('placeholder')
 );
 
 if (!isSupabaseConfigured) {
