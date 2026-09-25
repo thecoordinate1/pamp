@@ -27,10 +27,22 @@ export default defineConfig({
         ],
       },
       workbox: {
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // The HTML shell is deliberately not precached. Precaching it means a new
+        // deploy only reaches a visitor on their second load, and until then the
+        // browser keeps running a bundle the server has already deleted. Fetching
+        // it network-first makes a deploy apply on the first load, while the
+        // cached copy still starts the app offline or on a slow connection.
+        globPatterns: ['**/*.{js,css,svg,png,woff2}'],
         runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-shell',
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 8 },
+            },
+          },
           {
             urlPattern: ({ url }) =>
               url.hostname === 'images.unsplash.com' || url.pathname.includes('/storage/v1/object/public/'),
