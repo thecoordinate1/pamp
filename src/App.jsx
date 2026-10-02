@@ -23,6 +23,7 @@ import {
   useIsAdmin,
   useMyRsvps,
   useToggleRsvp,
+  useUpdateEvent,
 } from './lib/queries';
 
 function PageHeader({ eyebrow, title, description, action }) {
@@ -72,6 +73,7 @@ export default function App() {
   const { data: isAdmin = false } = useIsAdmin(user?.id);
   const toggleRsvp = useToggleRsvp(user?.id);
   const createEvent = useCreateEvent(user?.id);
+  const updateEvent = useUpdateEvent();
   const createGuestRequest = useCreateGuestRequest(user?.id);
   const decideGuestRequest = useDecideGuestRequest();
 
@@ -115,6 +117,9 @@ export default function App() {
   const handleCreateEvent = requireAuth('host an event', (newEvent) =>
     createEvent.mutate(newEvent, { onSuccess: () => setActivePage('explore') })
   );
+
+  const handleUpdateEvent = (id, changes) =>
+    updateEvent.mutate({ id, changes });
 
   const handleNewFacecardRequest = requireAuth('request a facecard', (req) =>
     createGuestRequest.mutate({
@@ -278,6 +283,7 @@ export default function App() {
                 onApproveFacecard={(id) => decideGuestRequest.mutate({ id, status: 'approved' })}
                 onDeclineFacecard={(id) => decideGuestRequest.mutate({ id, status: 'declined' })}
                 onCreateEvent={handleCreateEvent}
+                onUpdateEvent={handleUpdateEvent}
               />
             ) : (
               <StateCard

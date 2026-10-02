@@ -2,7 +2,7 @@ import { useState } from 'react';
 import CheckInSheet from './CheckInSheet';
 import { useAuth } from '../lib/authContext';
 import { uploadEventImage } from '../lib/storage';
-import { ImagePlus, QrCode } from 'lucide-react';
+import { ImagePlus, Pencil, QrCode } from 'lucide-react';
 
 const TABS = [
   { id: 'facecards', label: 'Requests' },
@@ -10,12 +10,30 @@ const TABS = [
   { id: 'create', label: 'New event' },
 ];
 
+const BLANK_EVENT = {
+  name: '',
+  category: 'tech_business',
+  date: '',
+  time: '',
+  city: 'Lusaka',
+  area: '',
+  vibe: '',
+  dressCode: '',
+  host: '',
+  whatsapp: '',
+  ticketPrice: 0,
+  fullAddress: '',
+  description: '',
+  image: 'https://images.unsplash.com/photo-1511578314322-379afb476865?w=600&h=400&fit=crop'
+};
+
 export default function HostDashboard({
   events,
   facecards,
   onApproveFacecard,
   onDeclineFacecard,
-  onCreateEvent
+  onCreateEvent,
+  onUpdateEvent
 }) {
   const [activeTab, setActiveTab] = useState('facecards'); // 'facecards' | 'events' | 'create'
   const { user } = useAuth();
@@ -25,23 +43,43 @@ export default function HostDashboard({
   const [isPublishing, setIsPublishing] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // New Event Form state
-  const [newEvent, setNewEvent] = useState({
-    name: '',
-    category: 'tech_business',
-    date: '',
-    time: '',
-    city: 'Lusaka',
-    area: '',
-    vibe: '',
-    dressCode: '',
-    host: '',
-    whatsapp: '',
-    ticketPrice: 0,
-    fullAddress: '',
-    description: '',
-    image: 'https://images.unsplash.com/photo-1511578314322-379afb476865?w=600&h=400&fit=crop'
-  });
+  // null = creating a new event, object = editing an existing one.
+  const [editingEvent, setEditingEvent] = useState(null);
+
+  // Event Form state (shared between create and edit)
+  const [newEvent, setNewEvent] = useState({ ...BLANK_EVENT });
+
+  const startEditing = (evt) => {
+    setEditingEvent(evt);
+    setNewEvent({
+      name: evt.name ?? '',
+      category: evt.category ?? 'tech_business',
+      date: evt.date ?? '',
+      time: evt.time ?? '',
+      city: evt.city ?? 'Lusaka',
+      area: evt.area ?? '',
+      vibe: evt.vibe ?? '',
+      dressCode: evt.dressCode ?? '',
+      host: evt.host ?? '',
+      whatsapp: '',
+      ticketPrice: evt.ticketPrice ?? 0,
+      fullAddress: '',
+      description: evt.description ?? '',
+      image: evt.image ?? BLANK_EVENT.image,
+    });
+    setImageFile(null);
+    setImagePreview(null);
+    setFormError('');
+    setActiveTab('create');
+  };
+
+  const cancelEditing = () => {
+    setEditingEvent(null);
+    setNewEvent({ ...BLANK_EVENT });
+    setImageFile(null);
+    setImagePreview(null);
+    setFormError('');
+  };
 
   const totalRSVPs = events.reduce((sum, e) => sum + (e.rsvpCount || 0), 0);
   const totalRevenue = events.reduce((sum, e) => sum + ((e.rsvpCount || 0) * (e.ticketPrice || 0)), 0);
@@ -66,7 +104,7 @@ export default function HostDashboard({
     reader.readAsDataURL(file);
   };
 
-  const handleCreateSubmit = async (e) => {
+  const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newEvent.name || !newEvent.date || !newEvent.area) {
       setFormError('Add a title, date and area to publish.');
@@ -82,7 +120,14 @@ export default function HostDashboard({
       if (imageFile && user?.id) {
         image = await uploadEventImage(imageFile, user.id);
       }
-      onCreateEvent({ ...newEvent, image });
+
+      if (editingEvent) {
+        onUpdateEvent(editingEvent.id, { ...newEvent, image, hostId: user?.id });
+        cancelEditing();
+        setActiveTab('events');
+      } else {
+        onCreateEvent({ ...newEvent, image });
+      }
       setImageFile(null);
       setImagePreview(null);
     } catch (err) {
@@ -100,6 +145,13 @@ export default function HostDashboard({
   ];
 
   const update = (field) => (e) => setNewEvent({ ...newEvent, [field]: e.target.value });
+
+  // When switching tabs, clear the edit state so "New event" starts blank.
+  const handleTabChange = (id) => {
+    if (id !== 'create' && editingEvent) cancelEditing();
+    if (id === 'create' && editingEvent) cancelEditing();
+    setActiveTab(id);
+  };
 
   return (
     <div>
@@ -136,7 +188,7 @@ export default function HostDashboard({
             type="button"
             role="tab"
             aria-selected={activeTab === id}
-            onClick={() => setActiveTab(id)}
+            onClick={() => handleTabChange(id)}
           >
             {label}
             {id === 'facecards' && pendingFacecards.length > 0 && (
@@ -160,7 +212,7 @@ export default function HostDashboard({
                       )}
                     </p>
                     {req.userRole && <p className="text-sm text-text-secondary">{req.userRole}</p>}
-                    <p className="mt-2 text-[15px] leading-relaxed text-text-primary/90">“{req.reason}”</p>
+                    <p className="mt-2 text-[15px] leading-relaxed text-text-primary/90">&ldquo;{req.reason}&rdquo;</p>
                     <p className="mt-2 text-[13px] text-text-muted">For {req.eventTitle}</p>
                   </div>
 
@@ -206,13 +258,37 @@ export default function HostDashboard({
                   {evt.rsvpCount} going · {evt.ticketPrice === 0 ? 'Free' : `${evt.currency || 'ZMW'} ${evt.ticketPrice}`}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => startEditing(evt)}
+                className="btn-icon w-9 h-9 shrink-0"
+                aria-label={`Edit ${evt.name}`}
+                title="Edit event"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
             </div>
           ))}
         </div>
       )}
 
       {activeTab === 'create' && (
-        <form onSubmit={handleCreateSubmit} className="card max-w-2xl p-5 sm:p-8 space-y-5 animate-fade-in">
+        <form onSubmit={handleFormSubmit} className="card max-w-2xl p-5 sm:p-8 space-y-5 animate-fade-in">
+          {editingEvent && (
+            <div className="flex items-center justify-between rounded-2xl bg-accent/10 px-4 py-3">
+              <p className="text-sm font-medium text-accent-hover">
+                Editing <span className="font-semibold text-white">{editingEvent.name}</span>
+              </p>
+              <button
+                type="button"
+                onClick={() => { cancelEditing(); setActiveTab('events'); }}
+                className="text-sm font-medium text-text-secondary hover:text-white"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div className="sm:col-span-2">
               <label htmlFor="new-event-name" className="field-label">Title</label>
@@ -232,12 +308,14 @@ export default function HostDashboard({
               <div className="flex items-center gap-4">
                 <label className="relative cursor-pointer group shrink-0" aria-label="Upload event artwork">
                   <span className={`flex w-28 h-20 items-center justify-center overflow-hidden rounded-2xl transition-colors duration-200 ${
-                    imagePreview
+                    imagePreview || (editingEvent && newEvent.image)
                       ? 'shadow-[0_0_0_2px_#E040FB]'
                       : 'bg-white/5 border border-dashed border-white/20 group-hover:border-accent/60'
                   }`}>
                     {imagePreview ? (
                       <img src={imagePreview} alt="" className="w-full h-full object-cover" />
+                    ) : editingEvent && newEvent.image ? (
+                      <img src={newEvent.image} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <ImagePlus className="w-6 h-6 text-text-secondary" />
                     )}
@@ -327,8 +405,8 @@ export default function HostDashboard({
             </p>
           )}
 
-          <button type="submit" className="btn-accent w-full sm:w-auto sm:px-8">
-            Publish event
+          <button type="submit" disabled={isPublishing} className="btn-accent w-full sm:w-auto sm:px-8 disabled:opacity-50">
+            {isPublishing ? (editingEvent ? 'Saving...' : 'Publishing...') : (editingEvent ? 'Save changes' : 'Publish event')}
           </button>
         </form>
       )}

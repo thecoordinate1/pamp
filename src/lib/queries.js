@@ -170,6 +170,34 @@ export function useCreateEvent(userId) {
   });
 }
 
+export function useUpdateEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, changes }) => {
+      const rows = unwrap(
+        await supabase
+          .from('events')
+          .update(eventToRow(changes, changes.hostId))
+          .eq('id', id)
+          .select(EVENT_COLUMNS)
+      );
+      // Upsert private details so the host can add or change the address later.
+      if (changes.fullAddress || changes.whatsapp) {
+        const privateRow = {
+          event_id: id,
+          full_address: changes.fullAddress ?? '',
+          host_whatsapp: changes.whatsapp || null,
+        };
+        await supabase
+          .from('event_private')
+          .upsert(privateRow, { onConflict: 'event_id' });
+      }
+      return rowToEvent(rows[0]);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.events }),
+  });
+}
+
 export function useGuestRequests(eventIds) {
   return useQuery({
     queryKey: ['requests', eventIds],

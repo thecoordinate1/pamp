@@ -76,12 +76,12 @@ export default function SignInSheet({ open, onClose, action = 'continue' }) {
       if (mode === 'signup') {
         const { data, error: err } = await signUpWithEmail(email.trim(), password);
         if (err) throw err;
-        // Confirmation is required, so a new account has no session yet.
-        if (!data.session) {
-          setMode('sent');
+        if (data?.session) {
+          close();
           return;
         }
-        close();
+        setMode('signin');
+        setNotice('Account created! Sign in with your details.');
         return;
       }
 
