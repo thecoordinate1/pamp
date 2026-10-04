@@ -64,10 +64,10 @@ export const keys = {
   eventPrivate: (id) => ['events', id, 'private'],
   attendees: (id) => ['events', id, 'attendees'],
   requests: (id) => ['events', id, 'requests'],
-  myRsvps: ['me', 'rsvps'],
-  myProfile: ['me', 'profile'],
-  // Keyed by user so one account's passes can never be served to the next
+  // Keyed by user so one account's data can never be served to the next
   // person who signs in on the same phone.
+  myRsvps: (userId) => ['me', userId, 'rsvps'],
+  myProfile: (userId) => ['me', userId, 'profile'],
   passes: ['passes'],
   myPasses: (userId) => ['passes', userId],
   myReferral: (userId) => ['referral', userId],
@@ -125,7 +125,7 @@ export function useAttendees(eventId) {
 
 export function useMyRsvps(userId) {
   return useQuery({
-    queryKey: keys.myRsvps,
+    queryKey: keys.myRsvps(userId),
     enabled: Boolean(userId),
     queryFn: async () => {
       const rows = unwrap(
@@ -150,7 +150,7 @@ export function useToggleRsvp(userId) {
       );
     },
     onSuccess: (_data, { eventId }) => {
-      qc.invalidateQueries({ queryKey: keys.myRsvps });
+      qc.invalidateQueries({ queryKey: keys.myRsvps(userId) });
       qc.invalidateQueries({ queryKey: keys.events });
       qc.invalidateQueries({ queryKey: keys.attendees(eventId) });
     },
@@ -297,7 +297,7 @@ export function useDecideGuestRequest() {
 
 export function useMyProfile(userId) {
   return useQuery({
-    queryKey: keys.myProfile,
+    queryKey: keys.myProfile(userId),
     enabled: Boolean(userId),
     queryFn: async () => {
       const rows = unwrap(
@@ -333,7 +333,9 @@ export function useCreateOrder() {
     onSuccess: (order) =>
       Promise.all([
         qc.invalidateQueries({ queryKey: keys.passes }),
-        qc.invalidateQueries({ queryKey: keys.myRsvps }),
+        // Prefix invalidation: catches ['me', <userId>, 'rsvps'] for whoever
+        // is signed in, without needing to know the userId here.
+        qc.invalidateQueries({ queryKey: ['me'] }),
         qc.invalidateQueries({ queryKey: keys.events }),
         order?.event_id ? qc.invalidateQueries({ queryKey: keys.attendees(order.event_id) }) : null,
       ]),
@@ -484,7 +486,7 @@ export function useUpdateProfile(userId) {
       return rows[0] ?? null;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.myProfile });
+      qc.invalidateQueries({ queryKey: keys.myProfile(userId) });
       // Attendee lists render these fields, so they are now stale.
       qc.invalidateQueries({ queryKey: ['events'] });
     },

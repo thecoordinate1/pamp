@@ -192,6 +192,12 @@ export default function App() {
     }
   }, [invite, isLoading, isError, invitedEvent]);
 
+  // A pass a friend sent (?pass=…) opens first, signed in or not.
+  // Declared before showInvite so showInvite can reference it without hitting
+  // the temporal dead zone.
+  const sharedPassToken = invite?.passToken;
+  const showSharedPass = Boolean(sharedPassToken) && !sharedPassClosed && !signIn && !ticketModalEvent;
+
   const showInvite =
     Boolean(invitedEvent) &&
     !showSharedPass &&
@@ -239,10 +245,6 @@ export default function App() {
   const handleReveal = requireAuth('reveal event locations', () =>
     setRevealedBy((who) => (who === user.id ? null : user.id))
   );
-
-  // A pass a friend sent (?pass=…) opens first, signed in or not.
-  const sharedPassToken = invite?.passToken;
-  const showSharedPass = Boolean(sharedPassToken) && !sharedPassClosed && !signIn && !ticketModalEvent;
   const closeSharedPass = ({ forget } = {}) => {
     setSharedPassClosed(true);
     if (forget) updateInvite(withoutInvitePart(invite, 'passToken'));
