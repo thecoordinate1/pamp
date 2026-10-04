@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import CheckInSheet from './CheckInSheet';
+import LocationPicker from './LocationPicker';
 import { useAuth } from '../lib/authContext';
+import { useEventPrivate } from '../lib/queries';
 import { uploadEventImage } from '../lib/storage';
 import { ImagePlus, Pencil, QrCode } from 'lucide-react';
 
@@ -23,6 +25,7 @@ const BLANK_EVENT = {
   whatsapp: '',
   ticketPrice: 0,
   fullAddress: '',
+  coordinates: null,
   description: '',
   image: 'https://images.unsplash.com/photo-1511578314322-379afb476865?w=600&h=400&fit=crop'
 };
@@ -49,8 +52,23 @@ export default function HostDashboard({
   // Event Form state (shared between create and edit)
   const [newEvent, setNewEvent] = useState({ ...BLANK_EVENT });
 
+  // The saved exact location, loaded when editing so the host sees it and a
+  // save never blanks it. Applied once per event, without overwriting anything
+  // the host has already typed or pinned.
+  const { data: savedLocation } = useEventPrivate(editingEvent?.id, Boolean(editingEvent));
+  const [locationLoadedFor, setLocationLoadedFor] = useState(null);
+  if (editingEvent && savedLocation && locationLoadedFor !== editingEvent.id) {
+    setLocationLoadedFor(editingEvent.id);
+    setNewEvent((form) => ({
+      ...form,
+      fullAddress: form.fullAddress || savedLocation.fullAddress || '',
+      coordinates: form.coordinates ?? savedLocation.coordinates ?? null,
+    }));
+  }
+
   const startEditing = (evt) => {
     setEditingEvent(evt);
+    setLocationLoadedFor(null);
     setNewEvent({
       name: evt.name ?? '',
       category: evt.category ?? 'tech_business',
@@ -64,6 +82,7 @@ export default function HostDashboard({
       whatsapp: '',
       ticketPrice: evt.ticketPrice ?? 0,
       fullAddress: '',
+      coordinates: null,
       description: evt.description ?? '',
       image: evt.image ?? BLANK_EVENT.image,
     });
@@ -75,6 +94,7 @@ export default function HostDashboard({
 
   const cancelEditing = () => {
     setEditingEvent(null);
+    setLocationLoadedFor(null);
     setNewEvent({ ...BLANK_EVENT });
     setImageFile(null);
     setImagePreview(null);
@@ -388,6 +408,29 @@ export default function HostDashboard({
               />
             </div>
           </div>
+
+          <fieldset>
+            <legend className="field-label">Exact location</legend>
+            <p className="mb-3 text-[13px] text-text-muted">
+              Only people with a pass or an approved request see this. Everyone else sees the
+              neighbourhood, rounded to about a kilometre.
+            </p>
+            <label htmlFor="new-event-address" className="sr-only">Address</label>
+            <input
+              id="new-event-address"
+              type="text"
+              placeholder="Plot 12, Leopards Hill Road, Kabulonga"
+              value={newEvent.fullAddress}
+              onChange={update('fullAddress')}
+              autoComplete="street-address"
+              className="input-dark mb-3"
+            />
+            <LocationPicker
+              idPrefix="new-event-location"
+              value={newEvent.coordinates}
+              onChange={(coordinates) => setNewEvent((form) => ({ ...form, coordinates }))}
+            />
+          </fieldset>
 
           <div>
             <label htmlFor="new-event-description" className="field-label">Description</label>

@@ -2,13 +2,26 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
-import { ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock, Minus, Plus, WifiOff } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clock, Minus, Plus, WifiOff } from 'lucide-react';
 import Sheet from './Sheet';
+import LocationCard from './LocationCard';
+import PassCarousel from './PassCarousel';
 import { formatEventDate } from '../lib/format';
 import { useAuth } from '../lib/authContext';
-import { keys, useCreateOrder, useMyPasses } from '../lib/queries';
+import { sharedPassUrl } from '../lib/invite';
+import {
+  keys,
+  useCreateOrder,
+  useEventPrivate,
+  useMyPasses,
+  useMyProfile,
+  useMyReferral,
+  useReclaimPass,
+  useSharePass,
+} from '../lib/queries';
 import { ngweeToZmw } from '../lib/mappers';
 import { summarisePasses } from '../lib/passes';
+import { shareOrCopy } from '../lib/useShareLink';
 
 const PROVIDERS = [
   { id: 'mtn', name: 'MTN MoMo', dot: '#FFCB05' },
@@ -23,45 +36,11 @@ function Spinner() {
 const celebrate = () =>
   confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, disableForReducedMotion: true });
 
-const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-// One pass admits one person: the QR the host scans, the ID to type in when a
-// camera will not read it, and whether it has been used yet.
-function PassCard({ event, pass, index, total }) {
-  const inside = pass.status === 'checked_in';
-  return (
-    <div className="overflow-hidden rounded-3xl text-left shadow-[0_24px_60px_rgba(124,77,255,0.25)]">
-      <div className="brand-gradient px-5 py-4 text-white">
-        <p className="text-[13px] font-semibold text-white/80">
-          PAMP pass{total > 1 ? ` · ${index + 1} of ${total}` : ''}
-        </p>
-        <p className="mt-0.5 text-lg font-bold leading-snug">{event.name}</p>
-        <p className="text-sm text-white/90">
-          {formatEventDate(event.date, event.time)} · {event.area}
-        </p>
-      </div>
-      <div className="bg-white px-5 py-6 flex flex-col items-center text-[#0D0D0D]">
-        <QRCodeSVG value={pass.code} size={176} level="H" />
-        <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-black/50">Pass ID</p>
-        <p className="font-mono text-2xl font-bold tracking-[0.2em]">{pass.code}</p>
-        <p
-          className={`mt-4 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold ${
-            inside ? 'bg-[#16a34a]/12 text-[#15803d]' : 'bg-black/5 text-black/60'
-          }`}
-        >
-          {inside ? (
-            <>
-              <CheckCircle2 className="w-4 h-4" />
-              Checked in{pass.checkedInAt ? ` at ${timeOf(pass.checkedInAt)}` : ''}
-            </>
-          ) : (
-            'Not scanned yet · admits one'
-          )}
-        </p>
-      </div>
-    </div>
-  );
-}
+// PostgREST's code for an RPC that does not exist yet: the sharing migration
+// has not been applied.
+const NOT_DEPLOYED = 'PGRST202';
+const friendly = (err, fallback) =>
+  err?.code === NOT_DEPLOYED ? 'Sending passes is not switched on yet. Try again soon.' : err?.message || fallback;
 
 export default function TicketModal({ event, isOpen, onClose }) {
   const formId = useId();
@@ -75,6 +54,13 @@ export default function TicketModal({ event, isOpen, onClose }) {
   const [buyingMore, setBuyingMore] = useState(false);
   const [page, setPage] = useState(0);
   const [error, setError] = useState('');
+  // Per-pass messages after sending or taking back, keyed by pass id.
+  const [notices, setNotices] = useState({});
+  const [busyCode, setBusyCode] = useState(null);
+  const sharePass = useSharePass();
+  const reclaimPass = useReclaimPass();
+  const { data: profile } = useMyProfile(user?.id);
+  const { data: referral } = useMyReferral(user?.id);
 
   const createOrder = useCreateOrder();
   const isProcessing = createOrder.isPending;
@@ -97,7 +83,8 @@ export default function TicketModal({ event, isOpen, onClose }) {
   const summary = summarisePasses(myPasses);
   const showingPasses = myPasses.length > 0 && !buyingMore && !pendingOrder;
   const claimedButUnseen = justClaimed && myPasses.length === 0 && !pendingOrder;
-  const currentPage = Math.min(page, Math.max(0, myPasses.length - 1));
+  // Holders are trusted with the exact address, so show it with their passes.
+  const { data: location } = useEventPrivate(event?.id, isOpen && showingPasses && Boolean(user));
 
   // The host's scan reaches this phone by polling. Mark the moment it lands.
   const seenCheckIns = useRef(null);
@@ -158,7 +145,43 @@ export default function TicketModal({ event, isOpen, onClose }) {
     }
   };
 
+  const notify = (passId, text) => setNotices((n) => ({ ...n, [passId]: text }));
+
+  // Sends one pass as a private link. It stays valid: whoever is scanned first
+  // gets in, and after that it is used up for every copy.
+  const handleSharePass = async (pass) => {
+    setBusyCode(pass.code);
+    notify(pass.id, '');
+    try {
+      const token = await sharePass.mutateAsync(pass.code);
+      const result = await shareOrCopy({
+        title: `A pass for ${event.name}`,
+        text: `I got you a pass to ${event.name} on PAMP. Show the QR at the door. It works once.`,
+        url: sharedPassUrl({ token, code: referral?.code ?? undefined }),
+      });
+      if (result === 'copied') notify(pass.id, 'Link copied. Paste it to your friend.');
+      if (result === 'failed') notify(pass.id, 'Could not share or copy the link on this phone.');
+    } catch (err) {
+      notify(pass.id, friendly(err, 'Could not send that pass. Try again.'));
+    } finally {
+      setBusyCode(null);
+    }
+  };
+
+  const handleReclaimPass = async (pass) => {
+    setBusyCode(pass.code);
+    try {
+      await reclaimPass.mutateAsync(pass.code);
+      notify(pass.id, 'Taken back. It has a new code, and the link you sent no longer works.');
+    } catch (err) {
+      notify(pass.id, friendly(err, 'Could not take that pass back. Try again.'));
+    } finally {
+      setBusyCode(null);
+    }
+  };
+
   const handleClose = () => {
+    setNotices({});
     setPendingOrder(null);
     setJustClaimed(false);
     setBuyingMore(false);
@@ -403,34 +426,19 @@ export default function TicketModal({ event, isOpen, onClose }) {
           )}
 
           <div className="mt-5">
-            <PassCard event={event} pass={myPasses[currentPage]} index={currentPage} total={myPasses.length} />
+            <PassCarousel
+              event={event}
+              passes={myPasses}
+              holderName={profile?.display_name || ''}
+              onShare={handleSharePass}
+              onReclaim={handleReclaimPass}
+              busyCode={busyCode}
+              notices={notices}
+              focusIndex={page}
+            />
           </div>
 
-          {myPasses.length > 1 && (
-            <div className="mt-4 flex items-center justify-center gap-4">
-              <button
-                type="button"
-                onClick={() => setPage(Math.max(0, currentPage - 1))}
-                disabled={currentPage === 0}
-                className="btn-icon w-10 h-10 disabled:opacity-40"
-                aria-label="Previous pass"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-              <span className="text-sm text-text-secondary tabular-nums">
-                Pass {currentPage + 1} of {myPasses.length}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage(Math.min(myPasses.length - 1, currentPage + 1))}
-                disabled={currentPage === myPasses.length - 1}
-                className="btn-icon w-10 h-10 disabled:opacity-40"
-                aria-label="Next pass"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            </div>
-          )}
+          <LocationCard location={location} className="mt-6" />
         </div>
       )}
     </Sheet>

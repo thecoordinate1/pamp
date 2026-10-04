@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import { EyeOff, MapPinned, Search } from 'lucide-react';
 import Navbar from './components/Navbar';
 import TabBar from './components/TabBar';
 import PartyCard from './components/PartyCard';
@@ -16,7 +16,10 @@ import AdminDashboard from './components/AdminDashboard';
 import ShareSheet from './components/ShareSheet';
 import EventInviteSheet from './components/EventInviteSheet';
 import MyPassesSheet from './components/MyPassesSheet';
+import SharedPassSheet from './components/SharedPassSheet';
+import LocationCard from './components/LocationCard';
 import { useAuth } from './lib/authContext';
+import { formatEventDate } from './lib/format';
 import { captureInvite, referralMetadata, saveInvite, withoutInvitePart } from './lib/invite';
 import { groupPassesByEvent } from './lib/passes';
 import {
@@ -28,6 +31,7 @@ import {
   useIsAdmin,
   useMyPasses,
   useMyRsvps,
+  useRevealedLocations,
   useToggleRsvp,
   useUpdateEvent,
 } from './lib/queries';
@@ -104,6 +108,10 @@ export default function App() {
   const [signIn, setSignIn] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [passesOpen, setPassesOpen] = useState(false);
+  // Exact locations on the map, for the person who asked: signing out or
+  // switching account turns it off without an effect.
+  const [revealedBy, setRevealedBy] = useState(null);
+  const [sharedPassClosed, setSharedPassClosed] = useState(false);
 
   // A shared link (?event=…&ref=…) is read once, on load, and kept until used.
   // This copy is the source of truth; storage is written through on a best
@@ -186,6 +194,7 @@ export default function App() {
 
   const showInvite =
     Boolean(invitedEvent) &&
+    !showSharedPass &&
     // Dismissed while signed out: not shown again until they sign in.
     !(invite?.dismissedAt && !user) &&
     inviteSeenBy !== (user?.id ?? null) &&
@@ -216,6 +225,27 @@ export default function App() {
   const openPass = (event) => {
     setPassesOpen(false);
     setTicketModalEvent(event);
+  };
+
+  // Reveal locations: the exact spot of every event this person holds a pass
+  // to. The database only returns locations they are allowed to see.
+  const revealing = Boolean(user) && revealedBy === user?.id;
+  const passEventIds = useMemo(() => [...passesByEvent.keys()], [passesByEvent]);
+  const {
+    data: revealed,
+    isLoading: revealLoading,
+    isError: revealError,
+  } = useRevealedLocations(passEventIds, revealing);
+  const handleReveal = requireAuth('reveal event locations', () =>
+    setRevealedBy((who) => (who === user.id ? null : user.id))
+  );
+
+  // A pass a friend sent (?pass=…) opens first, signed in or not.
+  const sharedPassToken = invite?.passToken;
+  const showSharedPass = Boolean(sharedPassToken) && !sharedPassClosed && !signIn && !ticketModalEvent;
+  const closeSharedPass = ({ forget } = {}) => {
+    setSharedPassClosed(true);
+    if (forget) updateInvite(withoutInvitePart(invite, 'passToken'));
   };
   // Actions taken from the invite close it first, so sheets never stack.
   const fromInvite = (fn) => (...args) => {
@@ -368,9 +398,20 @@ export default function App() {
               title="What's on near you"
               description="Every event, pinned to its neighbourhood. Tap a pin for details."
               action={
-                <button type="button" onClick={() => setActivePage('explore')} className="btn-secondary self-start sm:self-auto">
-                  View as list
-                </button>
+                <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={handleReveal}
+                    aria-pressed={revealing}
+                    className={revealing ? 'btn-secondary' : 'btn-accent'}
+                  >
+                    {revealing ? <EyeOff className="w-4 h-4" /> : <MapPinned className="w-4 h-4" />}
+                    {revealing ? 'Hide exact locations' : 'Reveal locations'}
+                  </button>
+                  <button type="button" onClick={() => setActivePage('explore')} className="btn-secondary">
+                    View as list
+                  </button>
+                </div>
               }
             />
             <EventMap
@@ -378,7 +419,51 @@ export default function App() {
               onSelectEvent={setNetworkingModalEvent}
               onGetTickets={handleGetTickets}
               passesByEvent={passesByEvent}
+              revealed={revealing ? revealed : undefined}
             />
+
+            {revealing && (
+              <section aria-labelledby="pass-locations" className="mt-8">
+                <h2 id="pass-locations" className="text-xl font-bold text-white">
+                  Where your passes are for
+                </h2>
+                {passEvents.length === 0 ? (
+                  <div className="card mt-4 p-6 text-center">
+                    <p className="text-text-secondary">
+                      You do not have any passes yet. Get one and its exact location shows here.
+                    </p>
+                    <button type="button" onClick={() => setActivePage('explore')} className="btn-accent mt-4">
+                      Browse events
+                    </button>
+                  </div>
+                ) : revealLoading ? (
+                  <div className="mt-4 h-24 rounded-3xl bg-white/5 animate-pulse" aria-hidden="true" />
+                ) : revealError ? (
+                  <p className="card mt-4 p-6 text-center text-text-secondary">
+                    Could not load the locations. Check your connection and try again.
+                  </p>
+                ) : (
+                  <ul className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {passEvents.map(({ event }) => {
+                      const location = revealed?.get(event.id);
+                      return (
+                        <li key={event.id} className="card p-4">
+                          <p className="eyebrow">{formatEventDate(event.date, event.time)}</p>
+                          <p className="font-semibold text-white">{event.name}</p>
+                          {location?.fullAddress || location?.coordinates ? (
+                            <LocationCard location={location} className="mt-3 border-0 bg-white/5" />
+                          ) : (
+                            <p className="mt-2 text-sm text-text-muted">
+                              The host has not added the exact location yet. It shows here once they do.
+                            </p>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            )}
           </section>
         )}
 
@@ -485,6 +570,17 @@ export default function App() {
         event={shareEvent}
         open={Boolean(shareEvent)}
         onClose={() => setShareEvent(null)}
+      />
+
+      <SharedPassSheet
+        token={sharedPassToken}
+        open={showSharedPass}
+        onClose={closeSharedPass}
+        signedIn={Boolean(user)}
+        onSignUp={() => {
+          setSharedPassClosed(true);
+          setSignIn({ action: 'join PAMP', mode: 'signup' });
+        }}
       />
 
       <MyPassesSheet

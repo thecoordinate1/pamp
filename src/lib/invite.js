@@ -11,10 +11,21 @@ const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 // Mirrors the referral_code format check in the database.
 export const REFERRAL_CODE_RE = /^[A-HJ-NP-Z2-9]{8}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Mirrors the share_token format check in the database.
+const PASS_TOKEN_RE = /^[0-9a-f]{64}$/;
 
 export function inviteUrl({ origin = globalThis.location?.origin, eventId, code } = {}) {
   const url = new URL('/', origin);
   if (eventId) url.searchParams.set('event', eventId);
+  if (code) url.searchParams.set('ref', code);
+  return url.toString();
+}
+
+// A pass sent to a friend: ?pass=<token>, plus the sender's code so a friend
+// who signs up is credited to them.
+export function sharedPassUrl({ origin = globalThis.location?.origin, token, code } = {}) {
+  const url = new URL('/', origin);
+  url.searchParams.set('pass', token);
   if (code) url.searchParams.set('ref', code);
   return url.toString();
 }
@@ -39,7 +50,7 @@ export function readInvite(storage = safeStorage(), now = Date.now()) {
 export function saveInvite(invite, storage = safeStorage()) {
   if (!storage) return;
   try {
-    if (invite?.eventId || invite?.ref) storage.setItem(STORAGE_KEY, JSON.stringify(invite));
+    if (invite?.eventId || invite?.ref || invite?.passToken) storage.setItem(STORAGE_KEY, JSON.stringify(invite));
     else storage.removeItem(STORAGE_KEY);
   } catch {
     // Full or blocked.
@@ -51,7 +62,7 @@ export function withoutInvitePart(invite, part) {
   if (!invite) return null;
   const next = { ...invite };
   delete next[part];
-  return next.eventId || next.ref ? next : null;
+  return next.eventId || next.ref || next.passToken ? next : null;
 }
 
 // Reads ?event= and ?ref= from the address the app opened on, keeps them, and
@@ -67,10 +78,12 @@ export function captureInvite({
   const params = new URLSearchParams(location.search);
   const eventId = params.get('event');
   const ref = params.get('ref')?.trim().toUpperCase();
+  const passToken = params.get('pass')?.trim().toLowerCase();
 
-  if (params.has('event') || params.has('ref')) {
+  if (params.has('event') || params.has('ref') || params.has('pass')) {
     params.delete('event');
     params.delete('ref');
+    params.delete('pass');
     const query = params.toString();
     history?.replaceState(history.state, '', `${location.pathname}${query ? `?${query}` : ''}${location.hash}`);
   }
@@ -78,9 +91,10 @@ export function captureInvite({
   const found = {};
   if (eventId && UUID_RE.test(eventId)) found.eventId = eventId;
   if (ref && REFERRAL_CODE_RE.test(ref)) found.ref = ref;
+  if (passToken && PASS_TOKEN_RE.test(passToken)) found.passToken = passToken;
 
   const stored = readInvite(storage, now);
-  if (!found.eventId && !found.ref) return stored;
+  if (!found.eventId && !found.ref && !found.passToken) return stored;
 
   // The newest link wins for whatever it carries, and is shown again even if
   // an earlier invite was dismissed.

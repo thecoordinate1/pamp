@@ -72,9 +72,33 @@ export function rowToPass(row) {
     eventId: row.event_id,
     orderId: row.order_id,
     createdAt: row.created_at,
+    // Set once the holder has sent this pass to someone as a link.
+    sharedAt: row.shared_at ?? null,
     // The event as it was when the pass was fetched, so it can be opened
     // offline. Null when the event is no longer listed.
     event: row.events ? rowToEvent(row.events) : null,
+  };
+}
+
+// One pass as a friend sees it through a shared link.
+export function rowToSharedPass(row) {
+  if (!row) return null;
+  return {
+    pass: { id: row.code, code: row.code, status: row.status, checkedInAt: row.checked_in_at ?? null },
+    event: {
+      id: row.event_id,
+      name: row.event_name,
+      date: row.starts_on,
+      time: row.start_time,
+      area: row.area,
+      image: row.image_url,
+    },
+    fromName: row.from_name || 'A friend',
+    location: rowToPrivateDetails({
+      full_address: row.full_address,
+      latitude: row.latitude,
+      longitude: row.longitude,
+    }),
   };
 }
 

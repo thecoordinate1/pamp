@@ -171,8 +171,15 @@ describe('rowToPass', () => {
       eventId: 'e1',
       orderId: 'o1',
       createdAt: '2026-10-01T10:00:00Z',
+      sharedAt: null,
       event: null,
     });
+  });
+
+  it('marks a pass that has been sent to a friend', () => {
+    expect(rowToPass({ id: 't4', code: 'X', status: 'valid', shared_at: '2026-10-04T12:00:00Z' }).sharedAt).toBe(
+      '2026-10-04T12:00:00Z'
+    );
   });
 
   it('keeps a copy of the event so the pass opens offline', () => {

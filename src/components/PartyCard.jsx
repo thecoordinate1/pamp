@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, CheckCircle2, Crown, MapPin, Share2, Ticket, Users } from 'lucide-react';
+import { BadgeCheck, Check, CheckCircle2, Crown, MapPin, Share2, Ticket, Users } from 'lucide-react';
 import VibeRating from './VibeRating';
 import { formatEventDate } from '../lib/format';
 import { summarisePasses } from '../lib/passes';
@@ -36,12 +36,17 @@ export default function PartyCard({
         <span className="glass absolute top-3 right-3 rounded-full px-3 py-1 text-[13px] font-semibold text-white">
           {priceText}
         </span>
-        {mine.attended && (
+        {mine.attended ? (
           <span className="glass absolute top-3 left-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold text-green">
             <CheckCircle2 className="w-3.5 h-3.5" />
             You attended
           </span>
-        )}
+        ) : mine.count > 0 ? (
+          <span className="glass absolute top-3 left-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold text-white">
+            <BadgeCheck className="w-3.5 h-3.5 text-accent" />
+            On the guest list
+          </span>
+        ) : null}
         <span className="absolute bottom-3 left-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-white/90">
           <Users className="w-3.5 h-3.5" />
           {party.rsvpCount} going

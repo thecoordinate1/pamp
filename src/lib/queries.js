@@ -7,6 +7,7 @@ import {
   rowToGuestRequest,
   rowToPass,
   rowToPrivateDetails,
+  rowToSharedPass,
 } from './mappers';
 import { readStoredPasses, storePasses } from './passes';
 
@@ -41,6 +42,18 @@ async function withEventColumns(run) {
 const PASS_EVENT_COLUMNS =
   'id, name, category, starts_on, start_time, city, area, image_url, host_display_name,' +
   ' ticket_price_ngwee, currency';
+const LEGACY_PASS_COLUMNS = `id, code, status, checked_in_at, event_id, order_id, created_at, events:event_id (${PASS_EVENT_COLUMNS})`;
+// shared_at arrives with migration 20261004000300: same fallback as events.
+const PASS_COLUMNS = `${LEGACY_PASS_COLUMNS}, shared_at`;
+let passColumns = PASS_COLUMNS;
+async function withPassColumns(run) {
+  const result = await run(passColumns);
+  if (result.error?.code === '42703' && passColumns !== LEGACY_PASS_COLUMNS) {
+    passColumns = LEGACY_PASS_COLUMNS;
+    return run(passColumns);
+  }
+  return result;
+}
 
 const PROFILE_EMBED =
   'profiles:user_id (display_name, headline, looking_for, social_platform, social_handle, avatar_path)';
@@ -186,14 +199,9 @@ export function useCreateEvent(userId) {
         )
       );
       const created = rowToEvent(rows[0]);
-      if (evt.fullAddress || evt.whatsapp) {
-        unwrap(
-          await supabase.from('event_private').insert({
-            event_id: created.id,
-            full_address: evt.fullAddress ?? '',
-            host_whatsapp: evt.whatsapp || null,
-          })
-        );
+      const details = privateDetailsRow(evt);
+      if (details) {
+        unwrap(await supabase.from('event_private').insert({ event_id: created.id, ...details }));
       }
       return created;
     },
@@ -214,21 +222,32 @@ export function useUpdateEvent() {
             .select(columns)
         )
       );
-      // Upsert private details so the host can add or change the address later.
-      if (changes.fullAddress || changes.whatsapp) {
-        const privateRow = {
-          event_id: id,
-          full_address: changes.fullAddress ?? '',
-          host_whatsapp: changes.whatsapp || null,
-        };
-        await supabase
-          .from('event_private')
-          .upsert(privateRow, { onConflict: 'event_id' });
+      // Upsert private details so the host can add or change the location later.
+      // Only fields the host filled in are sent, so a blank never wipes one.
+      const details = privateDetailsRow(changes);
+      if (details) {
+        unwrap(
+          await supabase
+            .from('event_private')
+            .upsert({ event_id: id, ...details }, { onConflict: 'event_id' })
+        );
       }
       return rowToEvent(rows[0]);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.events }),
   });
+}
+
+// The exact location and host contact as columns, leaving out anything blank.
+// Coordinates written here also move the event's public, rounded point.
+function privateDetailsRow({ fullAddress, whatsapp, coordinates } = {}) {
+  const row = {};
+  if (fullAddress?.trim()) row.full_address = fullAddress.trim();
+  if (whatsapp?.trim()) row.host_whatsapp = whatsapp.trim();
+  if (Array.isArray(coordinates) && coordinates.length === 2) {
+    [row.latitude, row.longitude] = coordinates;
+  }
+  return Object.keys(row).length ? row : null;
 }
 
 export function useGuestRequests(eventIds) {
@@ -334,14 +353,14 @@ export function useMyPasses(userId, { watchEventId, fetch = true } = {}) {
     enabled: Boolean(userId) && fetch,
     queryFn: async () => {
       const passes = unwrap(
-        await supabase
-          .from('tickets')
-          .select(
-            `id, code, status, checked_in_at, event_id, order_id, created_at, events:event_id (${PASS_EVENT_COLUMNS})`
-          )
-          .eq('user_id', userId)
-          .neq('status', 'void')
-          .order('created_at', { ascending: true })
+        await withPassColumns((columns) =>
+          supabase
+            .from('tickets')
+            .select(columns)
+            .eq('user_id', userId)
+            .neq('status', 'void')
+            .order('created_at', { ascending: true })
+        )
       ).map(rowToPass);
       storePasses(userId, passes);
       return passes;
@@ -356,6 +375,71 @@ export function useMyPasses(userId, { watchEventId, fetch = true } = {}) {
           return waiting ? 5000 : false;
         }
       : false,
+  });
+}
+
+// The private link for one of this person's unused passes. The same pass always
+// gives the same link until it is taken back.
+export function useSharePass() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (code) => {
+      const { data, error } = await supabase.rpc('share_pass', { p_code: code });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.passes });
+    },
+  });
+}
+
+// For a pass sent to the wrong person: a new code, so the link and QR already
+// sent stop working.
+export function useReclaimPass() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (code) => {
+      const { data, error } = await supabase.rpc('reclaim_pass', { p_code: code });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.passes }),
+  });
+}
+
+// A pass someone sent this person, by its link token. Works signed out, and
+// polls until the pass is used, so the card turns over when the door scans it.
+export function useSharedPass(token, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ['shared-pass', token],
+    enabled: Boolean(token) && enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('view_shared_pass', { p_token: token });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      return row ? rowToSharedPass(row) : null;
+    },
+    refetchInterval: (query) => (query.state.data?.pass.status === 'valid' ? 5000 : false),
+  });
+}
+
+// Exact locations for the given events. RLS returns rows only where this person
+// may see them (host, approved guest, pass holder), so asking is always safe.
+export function useRevealedLocations(eventIds, enabled) {
+  const ids = [...eventIds].sort();
+  return useQuery({
+    queryKey: ['revealed-locations', ids],
+    enabled: Boolean(enabled) && ids.length > 0,
+    queryFn: async () => {
+      const rows = unwrap(
+        await supabase
+          .from('event_private')
+          .select('event_id, full_address, latitude, longitude')
+          .in('event_id', ids)
+      );
+      return new Map(rows.map((r) => [r.event_id, rowToPrivateDetails(r)]));
+    },
   });
 }
 

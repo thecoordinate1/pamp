@@ -1,7 +1,9 @@
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapPin } from 'lucide-react';
+import { directionsUrl } from '../lib/maps';
 
 const CATEGORY_PINS = [
   { id: 'party', label: 'Parties', color: '#E040FB' },
@@ -29,7 +31,44 @@ function pinIcon(category) {
   return iconCache.get(color);
 }
 
-export default function EventMap({ events, onSelectEvent, onGetTickets, passesByEvent }) {
+// Exact pins are larger and ringed in white, so they read as "the real spot".
+const exactIconCache = new Map();
+function exactPinIcon(category) {
+  const color = (CATEGORY_PINS.find((c) => c.id === category) || CATEGORY_PINS[0]).color;
+  if (!exactIconCache.has(color)) {
+    exactIconCache.set(
+      color,
+      L.divIcon({
+        className: '',
+        html: `<span style="display:block;width:30px;height:30px;border-radius:9999px;background:${color};border:4px solid #fff;box-shadow:0 0 0 4px ${color}88,0 8px 20px rgba(0,0,0,.55)"></span>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -18],
+      })
+    );
+  }
+  return exactIconCache.get(color);
+}
+
+// Brings every revealed pin into view when the exact locations arrive.
+function FitToRevealed({ points }) {
+  const map = useMap();
+  const key = points.map((p) => p.join(',')).join('|');
+  useEffect(() => {
+    if (!key) return;
+    const pts = key.split('|').map((p) => p.split(',').map(Number));
+    if (pts.length === 1) map.setView(pts[0], 15);
+    else map.fitBounds(pts, { padding: [48, 48], maxZoom: 15 });
+  }, [map, key]);
+  return null;
+}
+
+// `revealed` maps event ids to exact locations this person may see. Those
+// events move from their public neighbourhood point to the real spot.
+export default function EventMap({ events, onSelectEvent, onGetTickets, passesByEvent, revealed }) {
+  const exactPoints = revealed
+    ? events.map((e) => revealed.get(e.id)?.coordinates).filter(Boolean)
+    : [];
   const defaultCenter = [-15.416, 28.322]; // Lusaka center
 
   return (
@@ -43,10 +82,19 @@ export default function EventMap({ events, onSelectEvent, onGetTickets, passesBy
           maxZoom={19}
         />
 
+        <FitToRevealed points={exactPoints} />
+
         {events.map((evt) => {
-          if (!evt.coordinates || evt.coordinates.length !== 2) return null;
+          const exact = revealed?.get(evt.id);
+          const position = exact?.coordinates ?? evt.coordinates;
+          if (!position || position.length !== 2) return null;
+          const directions = exact ? directionsUrl(exact) : null;
           return (
-            <Marker key={evt.id} position={evt.coordinates} icon={pinIcon(evt.category)}>
+            <Marker
+              key={`${evt.id}-${exact?.coordinates ? 'exact' : 'area'}`}
+              position={position}
+              icon={exact?.coordinates ? exactPinIcon(evt.category) : pinIcon(evt.category)}
+            >
               <Popup className="custom-map-popup" closeButton={false}>
                 <div className="w-56">
                   <img src={evt.image} alt="" className="w-full h-28 object-cover rounded-xl" />
@@ -56,6 +104,22 @@ export default function EventMap({ events, onSelectEvent, onGetTickets, passesBy
                     <MapPin className="w-3 h-3 shrink-0" />
                     <span className="truncate">{evt.area}</span>
                   </div>
+                  {exact && (
+                    <div className="mt-2 rounded-xl bg-white/5 px-3 py-2 text-xs">
+                      <p className="font-semibold text-accent">Exact location · you have a pass</p>
+                      {exact.fullAddress && <p className="mt-0.5 text-text-secondary">{exact.fullAddress}</p>}
+                      {directions && (
+                        <a
+                          href={directions}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 inline-block font-semibold text-white underline"
+                        >
+                          Directions
+                        </a>
+                      )}
+                    </div>
+                  )}
                   <div className="mt-3 flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold text-white">
                       {evt.ticketPrice ? `${evt.currency || 'ZMW'} ${evt.ticketPrice}` : 'Free'}

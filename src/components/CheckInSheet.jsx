@@ -26,7 +26,8 @@ export default function CheckInSheet({ open, onClose }) {
     try {
       const row = await checkIn.mutateAsync(trimmed);
       setResult(row);
-      if (navigator.vibrate) navigator.vibrate(row.was_already_in ? [40, 60, 40] : 60);
+      // A used pass gets a long double buzz, so the door can tell without looking.
+      if (navigator.vibrate) navigator.vibrate(row.was_already_in ? [200, 80, 200] : 60);
     } catch (err) {
       setResult(null);
       setError(err.message ?? 'Could not check that pass in.');
@@ -143,18 +144,31 @@ export default function CheckInSheet({ open, onClose }) {
           </div>
         )}
 
-        {result && (
-          <div
-            role="status"
-            className={`card flex items-center gap-3 p-4 ${
-              result.was_already_in ? 'border-amber/25 bg-amber/5' : 'border-green/25 bg-green/5'
-            }`}
-          >
-            <CheckCircle2 className={`w-7 h-7 shrink-0 ${result.was_already_in ? 'text-amber' : 'text-green'}`} />
+        {result && result.was_already_in && (
+          // A pass admits one person once. This one has been used, so it is a
+          // refusal, and there is nothing to undo.
+          <div role="alert" className="card flex items-center gap-3 border-red/25 bg-red/5 p-4">
+            <XCircle className="w-7 h-7 shrink-0 text-red" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-white">Pass already used</p>
+              <p className="text-sm text-text-secondary">
+                {result.holder_name}&apos;s pass {result.code} was scanned
+                {result.checked_in_at
+                  ? ` at ${new Date(result.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                  : ' earlier'}
+                . Do not let a second person in on it.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {result && !result.was_already_in && (
+          <div role="status" className="card flex items-center gap-3 border-green/25 bg-green/5 p-4">
+            <CheckCircle2 className="w-7 h-7 shrink-0 text-green" />
             <div className="min-w-0 flex-1">
               <p className="font-semibold text-white truncate">{result.holder_name}</p>
               <p className="text-sm text-text-secondary truncate">
-                {result.was_already_in ? 'Already checked in' : 'Checked in'} · {result.code}
+                On the guest list for {result.event_name} · {result.code}
               </p>
             </div>
             <button
