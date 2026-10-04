@@ -17,6 +17,7 @@ import ShareSheet from './components/ShareSheet';
 import EventInviteSheet from './components/EventInviteSheet';
 import MyPassesSheet from './components/MyPassesSheet';
 import SharedPassSheet from './components/SharedPassSheet';
+import PasswordResetSheet from './components/PasswordResetSheet';
 import LocationCard from './components/LocationCard';
 import { useAuth } from './lib/authContext';
 import { formatEventDate } from './lib/format';
@@ -28,6 +29,8 @@ import {
   useDecideGuestRequest,
   useEvents,
   useGuestRequests,
+  useHostEvents,
+  useMyGuestRequests,
   useIsAdmin,
   useMyPasses,
   useMyRsvps,
@@ -121,6 +124,17 @@ export default function App() {
     saveInvite(next);
     setInvite(next);
   };
+  // When an account signs out or another takes over, drop the links it opened
+  // here too (auth.jsx clears the stored copy). A first sign-in is not that:
+  // someone signing up from an invite keeps it.
+  const [inviteOwner, setInviteOwner] = useState(user?.id ?? null);
+  if ((user?.id ?? null) !== inviteOwner) {
+    if (inviteOwner) {
+      setInvite(null);
+      setSharedPassClosed(false);
+    }
+    setInviteOwner(user?.id ?? null);
+  }
   // Who closed the invite sheet. It comes back once if that changes, so someone
   // who signs up from it lands on the event they were invited to.
   const [inviteSeenBy, setInviteSeenBy] = useState(undefined);
@@ -130,21 +144,19 @@ export default function App() {
   }, [activePage]);
 
   // Events this user hosts, and the guest requests waiting on them.
-  const myEvents = useMemo(
-    () => (user ? events.filter((e) => e.hostId === user.id) : []),
-    [events, user]
-  );
+  const { data: myEvents = [] } = useHostEvents(user?.id);
   const myEventIds = useMemo(() => myEvents.map((e) => e.id), [myEvents]);
   const { data: guestRequests = [] } = useGuestRequests(myEventIds);
+  const { data: myRequests = [] } = useMyGuestRequests(user?.id);
 
   // Browsing is open to everyone; anything that writes needs an account.
   // Someone who arrived through an invite is shown sign-up first.
   const requireAuth = (action, fn, mode) => (...args) => {
     if (!user) {
       setSignIn({ action, mode: mode ?? (invite?.ref ? 'signup' : 'signin') });
-      return;
+      return undefined;
     }
-    fn(...args);
+    return fn(...args);
   };
 
   const handleRSVP = requireAuth('RSVP', (eventId) =>
@@ -158,10 +170,11 @@ export default function App() {
   const handleUpdateEvent = (id, changes) =>
     updateEvent.mutate({ id, changes });
 
-  const handleNewFacecardRequest = requireAuth('request a facecard', (req) =>
-    createGuestRequest.mutate({
-      eventId: req.partyId,
-      reason: req.message ?? req.reason,
+  // Returns the mutation's promise, so the form only says "sent" once it was.
+  const handleNewFacecardRequest = requireAuth('request to join an event', (req) =>
+    createGuestRequest.mutateAsync({
+      eventId: req.eventId,
+      reason: req.reason,
       selfiePath: req.selfiePath ?? null,
     })
   );
@@ -503,7 +516,9 @@ export default function App() {
             />
             <FacecardSection
               parties={events}
-              facecardRequests={guestRequests}
+              hostEvents={myEvents}
+              myRequests={myRequests}
+              hostRequests={guestRequests}
               onUpdateRequest={(id, status) => decideGuestRequest.mutate({ id, status })}
               onNewRequest={handleNewFacecardRequest}
             />
@@ -573,6 +588,8 @@ export default function App() {
         open={Boolean(shareEvent)}
         onClose={() => setShareEvent(null)}
       />
+
+      <PasswordResetSheet />
 
       <SharedPassSheet
         token={sharedPassToken}

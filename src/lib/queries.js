@@ -5,11 +5,13 @@ import {
   rowToAttendee,
   rowToEvent,
   rowToGuestRequest,
+  rowToMyRequest,
   rowToPass,
   rowToPrivateDetails,
   rowToSharedPass,
 } from './mappers';
 import { readStoredPasses, storePasses } from './passes';
+import { zambiaDateString } from './format';
 
 const unwrap = ({ data, error }) => {
   if (error) throw error;
@@ -83,7 +85,27 @@ export function useEvents() {
             .from('events')
             .select(columns)
             .eq('status', 'published')
+            .gte('starts_on', zambiaDateString(-1))
             .order('starts_on', { ascending: true })
+        )
+      ).map(rowToEvent),
+  });
+}
+
+// Every event this person hosts, whatever its date or status, for the host
+// dashboard. The public list only carries upcoming published events.
+export function useHostEvents(userId) {
+  return useQuery({
+    queryKey: ['events', 'hosted', userId],
+    enabled: Boolean(userId),
+    queryFn: async () =>
+      unwrap(
+        await withEventColumns((columns) =>
+          supabase
+            .from('events')
+            .select(columns)
+            .eq('host_id', userId)
+            .order('starts_on', { ascending: false })
         )
       ).map(rowToEvent),
   });
@@ -262,6 +284,62 @@ export function useGuestRequests(eventIds) {
           .in('event_id', eventIds)
           .order('created_at', { ascending: false })
       ).map(rowToGuestRequest),
+  });
+}
+
+// The requests this person has sent, with enough of each event to show it.
+export function useMyGuestRequests(userId) {
+  return useQuery({
+    queryKey: ['requests', 'mine', userId],
+    enabled: Boolean(userId),
+    queryFn: async () =>
+      unwrap(
+        await supabase
+          .from('guest_requests')
+          .select(`id, event_id, status, reason, created_at, decided_at, events:event_id (${PASS_EVENT_COLUMNS})`)
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+      ).map(rowToMyRequest),
+  });
+}
+
+// Signed links for selfies in the private bucket. Storage policies decide which
+// ones come back: a host gets the selfies sent with requests to their events.
+export function useSelfieUrls(paths) {
+  const list = [...new Set(paths.filter(Boolean))].sort();
+  return useQuery({
+    queryKey: ['selfie-urls', list],
+    enabled: list.length > 0,
+    // Links last an hour; refresh well before they expire.
+    staleTime: 30 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.storage.from('selfies').createSignedUrls(list, 3600);
+      if (error) throw error;
+      return new Map((data ?? []).filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl]));
+    },
+  });
+}
+
+// What hosts have actually been paid for their passes, in ngwee: paid orders
+// only, before PAMP's fee.
+export function useHostRevenue(eventIds) {
+  return useQuery({
+    queryKey: ['host-revenue', eventIds],
+    enabled: Array.isArray(eventIds) && eventIds.length > 0,
+    queryFn: async () =>
+      unwrap(
+        await supabase.from('orders').select('subtotal_ngwee').in('event_id', eventIds).eq('status', 'paid')
+      ).reduce((sum, r) => sum + (r.subtotal_ngwee ?? 0), 0),
+  });
+}
+
+// Just the display name, which hosts see on requests and guest lists.
+export function useSetDisplayName(userId) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (displayName) =>
+      unwrap(await supabase.from('profiles').update({ display_name: displayName }).eq('id', userId)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.myProfile(userId) }),
   });
 }
 

@@ -70,7 +70,7 @@ export default function PartyCard({
         </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <VibeRating initialScore={party.vibeScore || 92} />
+          {party.vibeScore != null && <VibeRating score={party.vibeScore} />}
           <button
             type="button"
             onClick={() => onViewAttendees(party)}

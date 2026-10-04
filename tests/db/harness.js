@@ -58,6 +58,10 @@ const SUPABASE_PRELUDE = `
     name text, owner uuid, created_at timestamptz default now()
   );
   alter table storage.objects enable row level security;
+  -- As on Supabase: the storage API reaches these tables as the caller, and
+  -- RLS policies decide what each caller may do.
+  grant select, insert, update, delete on storage.objects to anon, authenticated;
+  grant select on storage.buckets to anon, authenticated;
   create function storage.foldername(name text) returns text[]
   language sql immutable as $$
     select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1]

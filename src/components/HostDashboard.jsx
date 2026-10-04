@@ -2,9 +2,11 @@ import { useState } from 'react';
 import CheckInSheet from './CheckInSheet';
 import LocationPicker from './LocationPicker';
 import { useAuth } from '../lib/authContext';
-import { useEventPrivate } from '../lib/queries';
+import { useEventPrivate, useHostRevenue, useSelfieUrls } from '../lib/queries';
+import { ngweeToZmw } from '../lib/mappers';
+import { formatEventDate, zambiaDateString } from '../lib/format';
 import { uploadEventImage } from '../lib/storage';
-import { ImagePlus, Pencil, QrCode } from 'lucide-react';
+import { ExternalLink, ImagePlus, Pencil, QrCode } from 'lucide-react';
 
 const TABS = [
   { id: 'facecards', label: 'Requests' },
@@ -62,6 +64,7 @@ export default function HostDashboard({
     setNewEvent((form) => ({
       ...form,
       fullAddress: form.fullAddress || savedLocation.fullAddress || '',
+      whatsapp: form.whatsapp || savedLocation.whatsapp || '',
       coordinates: form.coordinates ?? savedLocation.coordinates ?? null,
     }));
   }
@@ -103,16 +106,16 @@ export default function HostDashboard({
 
   const totalRSVPs = events.reduce((sum, e) => sum + (e.rsvpCount || 0), 0);
   const totalAttended = events.reduce((sum, e) => sum + (e.attendedCount || 0), 0);
-  const totalRevenue = events.reduce((sum, e) => sum + ((e.rsvpCount || 0) * (e.ticketPrice || 0)), 0);
-  // Requests come in two shapes (seed data vs. the Facecard form), so read either.
+  // Money actually paid for passes, before PAMP's fee: not RSVPs times price,
+  // which counted free RSVPs as sales.
+  const { data: paidNgwee = 0 } = useHostRevenue(events.map((e) => e.id));
   const requests = facecards.map((r) => ({
     ...r,
-    userName: r.userName || r.name || 'Guest',
-    userRole: r.userRole || '',
-    userInstagram: r.userInstagram || '',
-    reason: r.reason || r.message || '',
-    eventTitle: r.eventTitle || events.find((e) => e.id === (r.eventId ?? r.partyId))?.name || 'an event',
+    eventTitle: events.find((e) => e.id === r.eventId)?.name || 'an event',
   }));
+  // The selfie sent with each request, which only this host may open.
+  const { data: selfieUrls } = useSelfieUrls(requests.map((r) => r.selfiePath));
+  const today = zambiaDateString();
   const pendingFacecards = requests.filter(f => f.status === 'pending');
 
   const handleImageChange = (e) => {
@@ -163,7 +166,7 @@ export default function HostDashboard({
     { label: 'Events', value: events.length },
     { label: 'RSVPs', value: totalRSVPs.toLocaleString() },
     { label: 'Attended', value: totalAttended.toLocaleString() },
-    { label: 'Est. revenue', value: `ZMW ${totalRevenue.toLocaleString()}` },
+    { label: 'Paid revenue', value: `ZMW ${ngweeToZmw(paidNgwee).toLocaleString()}` },
   ];
 
   const update = (field) => (e) => setNewEvent({ ...newEvent, [field]: e.target.value });
@@ -223,16 +226,40 @@ export default function HostDashboard({
             <ul className="card divide-y divide-white/5">
               {requests.map((req) => (
                 <li key={req.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 sm:p-6">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex gap-4">
+                    {selfieUrls?.get(req.selfiePath) ? (
+                      <img
+                        src={selfieUrls.get(req.selfiePath)}
+                        alt={`Selfie from ${req.userName}`}
+                        className="w-16 h-16 rounded-2xl object-cover shrink-0"
+                      />
+                    ) : (
+                      <span
+                        className="brand-gradient w-16 h-16 rounded-2xl flex items-center justify-center text-xl font-bold text-white shrink-0"
+                        aria-hidden="true"
+                      >
+                        {req.userName.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <div className="min-w-0">
                     <p className="font-semibold text-white">
                       {req.userName}
-                      {req.userInstagram && (
-                        <span className="ml-2 text-sm font-normal text-text-muted">{req.userInstagram}</span>
+                      {req.userSocial && (
+                        <a
+                          href={req.userSocial}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-2 inline-flex items-center gap-1 text-sm font-normal text-accent-hover hover:underline"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Profile
+                        </a>
                       )}
                     </p>
                     {req.userRole && <p className="text-sm text-text-secondary">{req.userRole}</p>}
                     <p className="mt-2 text-[15px] leading-relaxed text-text-primary/90">&ldquo;{req.reason}&rdquo;</p>
                     <p className="mt-2 text-[13px] text-text-muted">For {req.eventTitle}</p>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
@@ -270,7 +297,10 @@ export default function HostDashboard({
             <div key={evt.id} className="card flex items-center gap-4 p-3 pr-5">
               <img src={evt.image} alt="" className="w-20 h-20 rounded-2xl object-cover shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="eyebrow truncate">{evt.vibe}</p>
+                <p className="eyebrow truncate">
+                  {formatEventDate(evt.date, evt.time)}
+                  {evt.status !== 'published' ? ` · ${evt.status}` : evt.date < today ? ' · past' : ''}
+                </p>
                 <p className="font-semibold text-white truncate">{evt.name}</p>
                 <p className="text-sm text-text-secondary truncate">{evt.area}</p>
                 <p className="mt-1 text-[13px] text-text-muted">
@@ -430,6 +460,19 @@ export default function HostDashboard({
               value={newEvent.coordinates}
               onChange={(coordinates) => setNewEvent((form) => ({ ...form, coordinates }))}
             />
+            <label htmlFor="new-event-whatsapp" className="field-label mt-4">WhatsApp for guests</label>
+            <input
+              id="new-event-whatsapp"
+              type="tel"
+              inputMode="tel"
+              placeholder="260 97 123 4567"
+              value={newEvent.whatsapp}
+              onChange={update('whatsapp')}
+              className="input-dark"
+            />
+            <p className="mt-1.5 text-[13px] text-text-muted">
+              Optional. Shown with the location, so approved guests can message you.
+            </p>
           </fieldset>
 
           <div>

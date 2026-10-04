@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { AuthContext } from './authContext';
+import { saveInvite } from './invite';
 import { forgetStoredPasses } from './passes';
 import { safeStorage } from './safeStorage';
 
@@ -23,6 +24,9 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [offlineUserId, setOfflineUserId] = useState(null);
+  // True after someone follows a password reset link: they are signed in, but
+  // still need to choose the new password.
+  const [recovering, setRecovering] = useState(false);
   const queryClient = useQueryClient();
   const lastUserId = useRef(undefined);
 
@@ -39,7 +43,9 @@ export function AuthProvider({ children }) {
     });
 
     // Fires on sign-in, sign-out, token refresh and on the OAuth redirect back.
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true);
+      if (event === 'SIGNED_OUT') setRecovering(false);
       const nextId = next?.user?.id ?? null;
       // Phones get shared. When an account signs out or another takes its
       // place, drop every cached query and the passes kept for offline use, so
@@ -49,6 +55,9 @@ export function AuthProvider({ children }) {
         // and the refetches this triggers need that lock to attach a token.
         setTimeout(() => {
           forgetStoredPasses();
+          // Links opened on this phone belong to the account that opened them.
+          // A shared pass link is the pass itself, so it must not carry over.
+          saveInvite(null);
           queryClient.resetQueries();
         }, 0);
       }
@@ -101,8 +110,15 @@ export function AuthProvider({ children }) {
       resetPassword: (email) =>
         supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
       signOut: () => supabase.auth.signOut(),
+      recovering,
+      updatePassword: async (password) => {
+        const result = await supabase.auth.updateUser({ password });
+        if (!result.error) setRecovering(false);
+        return result;
+      },
+      finishRecovery: () => setRecovering(false),
     }),
-    [session, loading, offlineUserId]
+    [session, loading, offlineUserId, recovering]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -142,6 +142,17 @@ export function rowToAttendee(row) {
   };
 }
 
+export function rowToMyRequest(row) {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    status: row.status,
+    reason: row.reason || '',
+    createdAt: row.created_at,
+    event: row.events ? rowToEvent(row.events) : null,
+  };
+}
+
 export function rowToGuestRequest(row) {
   const p = row.profiles ?? {};
   return {
