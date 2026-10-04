@@ -13,7 +13,7 @@ export default defineConfig({
       manifest: {
         name: 'PAMP — Party At My Place',
         short_name: 'PAMP',
-        description: 'Find parties, mixers and lounges in Zambia. Buy entry passes with mobile money.',
+        description: 'Find parties, mixers and lounges in Zambia and get on the guest list from your phone.',
         start_url: '/',
         scope: '/',
         display: 'standalone',

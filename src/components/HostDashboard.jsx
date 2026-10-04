@@ -29,7 +29,8 @@ const BLANK_EVENT = {
   fullAddress: '',
   coordinates: null,
   description: '',
-  image: 'https://images.unsplash.com/photo-1511578314322-379afb476865?w=600&h=400&fit=crop'
+  // Branded artwork for events the host publishes without a photo.
+  image: '/event-placeholder.jpg'
 };
 
 export default function HostDashboard({
