@@ -5,19 +5,42 @@ import {
   rowToAttendee,
   rowToEvent,
   rowToGuestRequest,
+  rowToPass,
   rowToPrivateDetails,
 } from './mappers';
+import { readStoredPasses, storePasses } from './passes';
 
 const unwrap = ({ data, error }) => {
   if (error) throw error;
   return data;
 };
 
-const EVENT_COLUMNS =
+const LEGACY_EVENT_COLUMNS =
   'id, host_id, name, category, status, starts_on, start_time, city, area, vibe,' +
   ' dress_code, description, image_url, host_display_name, organization,' +
   ' ticket_price_ngwee, currency, capacity, rsvp_count, vibe_score,' +
   ' area_latitude, area_longitude';
+const EVENT_COLUMNS = `${LEGACY_EVENT_COLUMNS}, attended_count`;
+
+// attended_count arrives with migration 20261004000100. If the app is deployed
+// before that migration has run, PostgREST rejects the whole select (42703,
+// undefined column), so fall back to the columns that exist rather than take
+// the event list down. Postgres checks the list before writing anything, so
+// retrying an insert or update this way never applies it twice.
+let eventColumns = EVENT_COLUMNS;
+async function withEventColumns(run) {
+  const result = await run(eventColumns);
+  if (result.error?.code === '42703' && eventColumns !== LEGACY_EVENT_COLUMNS) {
+    eventColumns = LEGACY_EVENT_COLUMNS;
+    return run(eventColumns);
+  }
+  return result;
+}
+
+// Enough of an event to open its passes with no signal.
+const PASS_EVENT_COLUMNS =
+  'id, name, category, starts_on, start_time, city, area, image_url, host_display_name,' +
+  ' ticket_price_ngwee, currency';
 
 const PROFILE_EMBED =
   'profiles:user_id (display_name, headline, looking_for, social_platform, social_handle, avatar_path)';
@@ -30,7 +53,11 @@ export const keys = {
   requests: (id) => ['events', id, 'requests'],
   myRsvps: ['me', 'rsvps'],
   myProfile: ['me', 'profile'],
-  myTickets: ['me', 'tickets'],
+  // Keyed by user so one account's passes can never be served to the next
+  // person who signs in on the same phone.
+  passes: ['passes'],
+  myPasses: (userId) => ['passes', userId],
+  myReferral: (userId) => ['referral', userId],
 };
 
 export function useEvents() {
@@ -38,11 +65,13 @@ export function useEvents() {
     queryKey: keys.events,
     queryFn: async () =>
       unwrap(
-        await supabase
-          .from('events')
-          .select(EVENT_COLUMNS)
-          .eq('status', 'published')
-          .order('starts_on', { ascending: true })
+        await withEventColumns((columns) =>
+          supabase
+            .from('events')
+            .select(columns)
+            .eq('status', 'published')
+            .order('starts_on', { ascending: true })
+        )
       ).map(rowToEvent),
   });
 }
@@ -152,7 +181,9 @@ export function useCreateEvent(userId) {
   return useMutation({
     mutationFn: async (evt) => {
       const rows = unwrap(
-        await supabase.from('events').insert(eventToRow(evt, userId)).select(EVENT_COLUMNS)
+        await withEventColumns((columns) =>
+          supabase.from('events').insert(eventToRow(evt, userId)).select(columns)
+        )
       );
       const created = rowToEvent(rows[0]);
       if (evt.fullAddress || evt.whatsapp) {
@@ -175,11 +206,13 @@ export function useUpdateEvent() {
   return useMutation({
     mutationFn: async ({ id, changes }) => {
       const rows = unwrap(
-        await supabase
-          .from('events')
-          .update(eventToRow(changes, changes.hostId))
-          .eq('id', id)
-          .select(EVENT_COLUMNS)
+        await withEventColumns((columns) =>
+          supabase
+            .from('events')
+            .update(eventToRow(changes, changes.hostId))
+            .eq('id', id)
+            .select(columns)
+        )
       );
       // Upsert private details so the host can add or change the address later.
       if (changes.fullAddress || changes.whatsapp) {
@@ -276,44 +309,72 @@ export function useCreateOrder() {
       if (error) throw error;
       return Array.isArray(data) ? data[0] : data;
     },
-    onSuccess: (order) => {
-      qc.invalidateQueries({ queryKey: keys.myTickets });
-      qc.invalidateQueries({ queryKey: keys.myRsvps });
-      qc.invalidateQueries({ queryKey: keys.events });
-      if (order?.event_id) {
-        qc.invalidateQueries({ queryKey: keys.attendees(order.event_id) });
-      }
-    },
+    // Returned so mutateAsync resolves only once the new pass has been fetched,
+    // which lets the sheet go straight to showing it.
+    onSuccess: (order) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: keys.passes }),
+        qc.invalidateQueries({ queryKey: keys.myRsvps }),
+        qc.invalidateQueries({ queryKey: keys.events }),
+        order?.event_id ? qc.invalidateQueries({ queryKey: keys.attendees(order.event_id) }) : null,
+      ]),
   });
 }
 
-export function useOrderTickets(orderId) {
+// Everything this person holds a pass for, each with enough of its event to
+// open it. The last copy fetched is kept on the phone and shown straight away,
+// so a pass still opens at the door with no signal and no event list. With
+// `watchEventId`, it polls while any pass for that event is still unscanned,
+// so the host's scan shows on the guest's phone within seconds. `fetch: false`
+// shows only the saved copy: for someone whose session could not be refreshed
+// offline, where a fetch would come back empty and overwrite it.
+export function useMyPasses(userId, { watchEventId, fetch = true } = {}) {
   return useQuery({
-    queryKey: ['orders', orderId, 'tickets'],
-    enabled: Boolean(orderId),
-    queryFn: async () =>
-      unwrap(
+    queryKey: keys.myPasses(userId),
+    enabled: Boolean(userId) && fetch,
+    queryFn: async () => {
+      const passes = unwrap(
         await supabase
           .from('tickets')
-          .select('id, code, status, event_id, order_id')
-          .eq('order_id', orderId)
-          .order('created_at', { ascending: true })
-      ),
-  });
-}
-
-export function useMyTickets(userId) {
-  return useQuery({
-    queryKey: keys.myTickets,
-    enabled: Boolean(userId),
-    queryFn: async () =>
-      unwrap(
-        await supabase
-          .from('tickets')
-          .select('id, code, status, checked_in_at, events:event_id (id, name, starts_on, start_time, area, image_url)')
+          .select(
+            `id, code, status, checked_in_at, event_id, order_id, created_at, events:event_id (${PASS_EVENT_COLUMNS})`
+          )
           .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-      ),
+          .neq('status', 'void')
+          .order('created_at', { ascending: true })
+      ).map(rowToPass);
+      storePasses(userId, passes);
+      return passes;
+    },
+    initialData: () => readStoredPasses(userId)?.passes,
+    initialDataUpdatedAt: () => readStoredPasses(userId)?.savedAt,
+    refetchInterval: watchEventId
+      ? (query) => {
+          const waiting = (query.state.data ?? []).some(
+            (p) => p.eventId === watchEventId && p.status !== 'checked_in'
+          );
+          return waiting ? 5000 : false;
+        }
+      : false,
+  });
+}
+
+// The person's own invite code, and how many people have joined with it.
+export function useMyReferral(userId) {
+  return useQuery({
+    queryKey: keys.myReferral(userId),
+    enabled: Boolean(userId),
+    queryFn: async () => {
+      const rows = unwrap(
+        await supabase.from('account_private').select('referral_code').eq('user_id', userId).limit(1)
+      );
+      const { count, error } = await supabase
+        .from('referrals')
+        .select('referred_id', { count: 'exact', head: true })
+        .eq('referrer_id', userId);
+      if (error) throw error;
+      return { code: rows[0]?.referral_code ?? null, joined: count ?? 0 };
+    },
   });
 }
 
@@ -358,7 +419,11 @@ export function useCheckInTicket() {
       if (!row) throw new Error('No pass with that code');
       return row;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['event-tickets'] }),
+    // Not awaited: the result shows at the door straight away, and the counts
+    // catch up behind it.
+    onSuccess: () => {
+      invalidateAttendance(qc);
+    },
   });
 }
 
@@ -370,8 +435,20 @@ export function useUndoCheckIn() {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['event-tickets'] }),
+    onSuccess: () => {
+      invalidateAttendance(qc);
+    },
   });
+}
+
+// A check-in moves the door list, the event's attended count, and the pass
+// itself when hosts scan their own.
+function invalidateAttendance(qc) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['event-tickets'] }),
+    qc.invalidateQueries({ queryKey: keys.events }),
+    qc.invalidateQueries({ queryKey: keys.passes }),
+  ]);
 }
 
 // Hosts can read tickets for their own events, so the door list is a plain query.

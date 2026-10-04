@@ -13,7 +13,12 @@ import InstallPrompt from './components/InstallPrompt';
 import SignInSheet from './components/SignInSheet';
 import ProfileSheet from './components/ProfileSheet';
 import AdminDashboard from './components/AdminDashboard';
+import ShareSheet from './components/ShareSheet';
+import EventInviteSheet from './components/EventInviteSheet';
+import MyPassesSheet from './components/MyPassesSheet';
 import { useAuth } from './lib/authContext';
+import { captureInvite, referralMetadata, saveInvite, withoutInvitePart } from './lib/invite';
+import { groupPassesByEvent } from './lib/passes';
 import {
   useCreateEvent,
   useCreateGuestRequest,
@@ -21,6 +26,7 @@ import {
   useEvents,
   useGuestRequests,
   useIsAdmin,
+  useMyPasses,
   useMyRsvps,
   useToggleRsvp,
   useUpdateEvent,
@@ -66,11 +72,17 @@ function CardSkeleton() {
 }
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, offlineUserId } = useAuth();
 
   const { data: events = [], isLoading, isError, error } = useEvents();
   const { data: rsvps = new Set() } = useMyRsvps(user?.id);
   const { data: isAdmin = false } = useIsAdmin(user?.id);
+  // Offline with an expired session there is no user, but the passes saved on
+  // this phone for the last account are still shown. Nothing is fetched for them.
+  const { data: myPasses = [], isError: passesOffline } = useMyPasses(user?.id ?? offlineUserId, {
+    fetch: Boolean(user),
+  });
+  const passesByEvent = useMemo(() => groupPassesByEvent(myPasses), [myPasses]);
   const toggleRsvp = useToggleRsvp(user?.id);
   const createEvent = useCreateEvent(user?.id);
   const updateEvent = useUpdateEvent();
@@ -86,8 +98,24 @@ export default function App() {
   // Modals
   const [ticketModalEvent, setTicketModalEvent] = useState(null);
   const [networkingModalEvent, setNetworkingModalEvent] = useState(null);
-  const [signInFor, setSignInFor] = useState(null);
+  const [shareEvent, setShareEvent] = useState(null);
+  // { action, mode }: what the person was trying to do, and whether to open
+  // on sign-in or sign-up.
+  const [signIn, setSignIn] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [passesOpen, setPassesOpen] = useState(false);
+
+  // A shared link (?event=…&ref=…) is read once, on load, and kept until used.
+  // This copy is the source of truth; storage is written through on a best
+  // effort basis, so invites still work where a browser blocks storage.
+  const [invite, setInvite] = useState(() => captureInvite());
+  const updateInvite = (next) => {
+    saveInvite(next);
+    setInvite(next);
+  };
+  // Who closed the invite sheet. It comes back once if that changes, so someone
+  // who signs up from it lands on the event they were invited to.
+  const [inviteSeenBy, setInviteSeenBy] = useState(undefined);
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -102,9 +130,10 @@ export default function App() {
   const { data: guestRequests = [] } = useGuestRequests(myEventIds);
 
   // Browsing is open to everyone; anything that writes needs an account.
-  const requireAuth = (action, fn) => (...args) => {
+  // Someone who arrived through an invite is shown sign-up first.
+  const requireAuth = (action, fn, mode) => (...args) => {
     if (!user) {
-      setSignInFor(action);
+      setSignIn({ action, mode: mode ?? (invite?.ref ? 'signup' : 'signin') });
       return;
     }
     fn(...args);
@@ -131,6 +160,69 @@ export default function App() {
 
   const handleGetTickets = requireAuth('get a pass', (evt) => setTicketModalEvent(evt));
 
+  // Sharing carries the sharer's referral code, so it needs an account.
+  const handleShare = requireAuth('share events and earn rewards', (evt) => setShareEvent(evt), 'signup');
+
+  // An existing account needs no referral, and a new one already sent its code
+  // with sign-up, so once someone is signed in the code has done its job.
+  useEffect(() => {
+    if (user && invite?.ref) {
+      const next = withoutInvitePart(invite, 'ref');
+      saveInvite(next);
+      setInvite(next);
+    }
+  }, [user, invite]);
+
+  const invitedEvent = invite?.eventId ? events.find((e) => e.id === invite.eventId) ?? null : null;
+
+  // A link to an event that is gone, or no longer published, is dropped.
+  useEffect(() => {
+    if (invite?.eventId && !isLoading && !isError && !invitedEvent) {
+      const next = withoutInvitePart(invite, 'eventId');
+      saveInvite(next);
+      setInvite(next);
+    }
+  }, [invite, isLoading, isError, invitedEvent]);
+
+  const showInvite =
+    Boolean(invitedEvent) &&
+    // Dismissed while signed out: not shown again until they sign in.
+    !(invite?.dismissedAt && !user) &&
+    inviteSeenBy !== (user?.id ?? null) &&
+    !ticketModalEvent &&
+    !shareEvent &&
+    !signIn &&
+    !networkingModalEvent;
+
+  const closeInvite = () => {
+    // A signed-in person has now seen it: done. A visitor will see it once
+    // more after signing up, so it is kept, marked as dismissed until then.
+    if (user) updateInvite(withoutInvitePart(invite, 'eventId'));
+    else if (invite) updateInvite({ ...invite, dismissedAt: Date.now() });
+    setInviteSeenBy(user?.id ?? null);
+  };
+
+  // Every event this person holds passes for. The live event is used when the
+  // list has loaded, and the copy saved with the pass when it has not.
+  const passEvents = useMemo(() => {
+    const list = [];
+    for (const [eventId, passes] of passesByEvent) {
+      const event = events.find((e) => e.id === eventId) ?? passes.find((p) => p.event)?.event;
+      if (event) list.push({ event, passes });
+    }
+    return list.sort((a, b) => `${a.event.date}`.localeCompare(`${b.event.date}`));
+  }, [passesByEvent, events]);
+
+  const openPass = (event) => {
+    setPassesOpen(false);
+    setTicketModalEvent(event);
+  };
+  // Actions taken from the invite close it first, so sheets never stack.
+  const fromInvite = (fn) => (...args) => {
+    closeInvite();
+    fn(...args);
+  };
+
   const resetFilters = () => {
     setActiveCategory('all');
     setSelectedCity('All Zambia');
@@ -154,7 +246,9 @@ export default function App() {
         activeSection={activePage}
         onNavigate={setActivePage}
         onOpenProfile={() => setProfileOpen(true)}
-        onSignIn={() => setSignInFor('continue')}
+        onSignIn={() => setSignIn({ action: 'continue', mode: invite?.ref ? 'signup' : 'signin' })}
+        passCount={passEvents.reduce((n, e) => n + e.passes.length, 0)}
+        onOpenPasses={() => setPassesOpen(true)}
       />
 
       <main className="max-w-6xl mx-auto px-5 md:px-8 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-32 md:pb-20">
@@ -209,11 +303,22 @@ export default function App() {
             ) : isError ? (
               <StateCard
                 title="Couldn't load events"
-                body={error?.message ?? 'Check your connection and try again.'}
+                body={
+                  passEvents.length > 0
+                    ? 'Check your connection. Your passes are saved on this phone and still work.'
+                    : error?.message ?? 'Check your connection and try again.'
+                }
                 action={
-                  <button type="button" onClick={() => window.location.reload()} className="btn-secondary mt-6">
-                    Try again
-                  </button>
+                  <div className="mt-6 flex flex-wrap justify-center gap-3">
+                    {passEvents.length > 0 && (
+                      <button type="button" onClick={() => setPassesOpen(true)} className="btn-accent">
+                        Show my passes
+                      </button>
+                    )}
+                    <button type="button" onClick={() => window.location.reload()} className="btn-secondary">
+                      Try again
+                    </button>
+                  </div>
                 }
               />
             ) : filteredEvents.length > 0 ? (
@@ -227,6 +332,8 @@ export default function App() {
                     onFacecard={() => setActivePage('facecard')}
                     onGetTickets={handleGetTickets}
                     onViewAttendees={setNetworkingModalEvent}
+                    onShare={handleShare}
+                    passes={passesByEvent.get(evt.id)}
                   />
                 ))}
               </div>
@@ -270,6 +377,7 @@ export default function App() {
               events={filteredEvents}
               onSelectEvent={setNetworkingModalEvent}
               onGetTickets={handleGetTickets}
+              passesByEvent={passesByEvent}
             />
           </section>
         )}
@@ -290,7 +398,7 @@ export default function App() {
                 title="Sign in to host"
                 body="Create an account to post events and manage your guest list."
                 action={
-                  <button type="button" onClick={() => setSignInFor('host an event')} className="btn-accent mt-6">
+                  <button type="button" onClick={() => setSignIn({ action: 'host an event', mode: 'signin' })} className="btn-accent mt-6">
                     Sign in
                   </button>
                 }
@@ -341,6 +449,23 @@ export default function App() {
       <TabBar active={activePage} onNavigate={setActivePage} />
       <InstallPrompt />
 
+      <EventInviteSheet
+        event={invitedEvent}
+        open={showInvite}
+        onClose={closeInvite}
+        signedIn={Boolean(user)}
+        onSignUp={fromInvite(() =>
+          setSignIn({ action: `get your pass for ${invitedEvent?.name ?? 'this event'}`, mode: 'signup' })
+        )}
+        onRSVP={fromInvite(handleRSVP)}
+        isRSVPed={Boolean(invitedEvent && rsvps.has(invitedEvent.id))}
+        onFacecard={fromInvite(() => setActivePage('facecard'))}
+        onGetTickets={fromInvite(handleGetTickets)}
+        onViewAttendees={fromInvite(setNetworkingModalEvent)}
+        onShare={fromInvite(handleShare)}
+        passes={invitedEvent ? passesByEvent.get(invitedEvent.id) : undefined}
+      />
+
       <TicketModal
         key={`ticket-${ticketModalEvent?.id}`}
         event={ticketModalEvent}
@@ -355,10 +480,28 @@ export default function App() {
         onClose={() => setNetworkingModalEvent(null)}
       />
 
+      <ShareSheet
+        key={`share-${shareEvent?.id}`}
+        event={shareEvent}
+        open={Boolean(shareEvent)}
+        onClose={() => setShareEvent(null)}
+      />
+
+      <MyPassesSheet
+        open={passesOpen}
+        onClose={() => setPassesOpen(false)}
+        passEvents={passEvents}
+        offline={!user || passesOffline}
+        onOpen={openPass}
+      />
+
       <SignInSheet
-        open={Boolean(signInFor)}
-        action={signInFor ?? 'continue'}
-        onClose={() => setSignInFor(null)}
+        open={Boolean(signIn)}
+        action={signIn?.action ?? 'continue'}
+        initialMode={signIn?.mode ?? 'signin'}
+        referral={referralMetadata(invite)}
+        inviteEventId={invite?.eventId}
+        onClose={() => setSignIn(null)}
       />
 
       <ProfileSheet

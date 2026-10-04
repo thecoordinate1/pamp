@@ -12,6 +12,9 @@ export default defineConfig({
       'tests/**/*.test.js',
       'supabase/functions/**/*.test.ts',
     ],
-    testTimeout: 30000,
+    testTimeout: 60000,
+    // The database suites boot Postgres and run every migration in beforeAll,
+    // which can pass the 10s default when several start at once.
+    hookTimeout: 60000,
   },
 })

@@ -31,6 +31,8 @@ export function rowToEvent(row) {
     currency: row.currency,
     capacity: row.capacity,
     rsvpCount: row.rsvp_count ?? 0,
+    // People the host actually let in at the door.
+    attendedCount: row.attended_count ?? 0,
     vibeScore: row.vibe_score,
     // Neighbourhood-level only. The exact point lives in event_private and is
     // fetched separately by people who are allowed to see it.
@@ -57,6 +59,22 @@ export function eventToRow(evt, hostId) {
     host_display_name: evt.host ?? '',
     organization: evt.organization || null,
     ticket_price_ngwee: zmwToNgwee(evt.ticketPrice),
+  };
+}
+
+export function rowToPass(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    code: row.code,
+    status: row.status,
+    checkedInAt: row.checked_in_at ?? null,
+    eventId: row.event_id,
+    orderId: row.order_id,
+    createdAt: row.created_at,
+    // The event as it was when the pass was fetched, so it can be opened
+    // offline. Null when the event is no longer listed.
+    event: row.events ? rowToEvent(row.events) : null,
   };
 }
 

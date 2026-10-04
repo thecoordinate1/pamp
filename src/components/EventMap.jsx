@@ -29,7 +29,7 @@ function pinIcon(category) {
   return iconCache.get(color);
 }
 
-export default function EventMap({ events, onSelectEvent, onGetTickets }) {
+export default function EventMap({ events, onSelectEvent, onGetTickets, passesByEvent }) {
   const defaultCenter = [-15.416, 28.322]; // Lusaka center
 
   return (
@@ -73,7 +73,7 @@ export default function EventMap({ events, onSelectEvent, onGetTickets }) {
                         onClick={() => onGetTickets(evt)}
                         className="brand-gradient h-8 px-3 rounded-full text-xs font-semibold text-white"
                       >
-                        Get pass
+                        {passesByEvent?.get(evt.id)?.length ? 'Show pass' : 'Get pass'}
                       </button>
                     </div>
                   </div>

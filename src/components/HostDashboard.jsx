@@ -82,6 +82,7 @@ export default function HostDashboard({
   };
 
   const totalRSVPs = events.reduce((sum, e) => sum + (e.rsvpCount || 0), 0);
+  const totalAttended = events.reduce((sum, e) => sum + (e.attendedCount || 0), 0);
   const totalRevenue = events.reduce((sum, e) => sum + ((e.rsvpCount || 0) * (e.ticketPrice || 0)), 0);
   // Requests come in two shapes (seed data vs. the Facecard form), so read either.
   const requests = facecards.map((r) => ({
@@ -141,6 +142,7 @@ export default function HostDashboard({
   const stats = [
     { label: 'Events', value: events.length },
     { label: 'RSVPs', value: totalRSVPs.toLocaleString() },
+    { label: 'Attended', value: totalAttended.toLocaleString() },
     { label: 'Est. revenue', value: `ZMW ${totalRevenue.toLocaleString()}` },
   ];
 
@@ -167,12 +169,9 @@ export default function HostDashboard({
         </button>
       </div>
 
-      <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 mb-8">
-        {stats.map(({ label, value }, i) => (
-          <div
-            key={label}
-            className={`card px-4 py-4 sm:px-6 sm:py-5 ${i === stats.length - 1 ? 'col-span-2 sm:col-span-1' : ''}`}
-          >
+      <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-8">
+        {stats.map(({ label, value }) => (
+          <div key={label} className="card px-4 py-4 sm:px-6 sm:py-5">
             <dt className="text-[13px] text-text-muted">{label}</dt>
             <dd className="mt-1 text-xl sm:text-3xl font-bold tracking-tight text-white truncate">{value}</dd>
           </div>
@@ -255,7 +254,10 @@ export default function HostDashboard({
                 <p className="font-semibold text-white truncate">{evt.name}</p>
                 <p className="text-sm text-text-secondary truncate">{evt.area}</p>
                 <p className="mt-1 text-[13px] text-text-muted">
-                  {evt.rsvpCount} going · {evt.ticketPrice === 0 ? 'Free' : `${evt.currency || 'ZMW'} ${evt.ticketPrice}`}
+                  {evt.rsvpCount} going
+                  {evt.attendedCount > 0 && ` · ${evt.attendedCount} attended`}
+                  {' · '}
+                  {evt.ticketPrice === 0 ? 'Free' : `${evt.currency || 'ZMW'} ${evt.ticketPrice}`}
                 </p>
               </div>
               <button

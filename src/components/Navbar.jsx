@@ -1,10 +1,11 @@
+import { Ticket } from 'lucide-react';
 import { NAV_ITEMS } from './navItems';
 import { useAuth } from '../lib/authContext';
 
 // Top bar: wordmark everywhere, section links on desktop (phones use the TabBar).
 // The account control sits here at every width, because the TabBar already
 // carries four tabs and a fifth crowds it on a phone.
-export default function Navbar({ activeSection, onNavigate, onOpenProfile, onSignIn }) {
+export default function Navbar({ activeSection, onNavigate, onOpenProfile, onSignIn, passCount = 0, onOpenPasses }) {
   const { user, loading } = useAuth();
   const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || '';
   const initial = (displayName.match(/[A-Za-z0-9]/)?.[0] ?? '?').toUpperCase();
@@ -51,6 +52,25 @@ export default function Navbar({ activeSection, onNavigate, onOpenProfile, onSig
           >
             Host an event
           </button>
+
+          {/* Passes open from here even when the event list cannot load. */}
+          {passCount > 0 && (
+            <button
+              type="button"
+              onClick={onOpenPasses}
+              aria-label={`Your passes (${passCount})`}
+              title="Your passes"
+              className="btn-icon relative w-9 h-9"
+            >
+              <Ticket className="w-[18px] h-[18px] text-accent" />
+              <span
+                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-accent px-1 text-[11px] font-bold leading-[18px] text-white text-center"
+                aria-hidden="true"
+              >
+                {passCount}
+              </span>
+            </button>
+          )}
 
           {loading ? (
             <span className="w-9 h-9 rounded-full bg-white/5 animate-pulse" aria-hidden="true" />

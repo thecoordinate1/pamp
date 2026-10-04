@@ -1,11 +1,14 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
-import { CheckCircle2, Clock, Minus, Plus } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock, Minus, Plus, WifiOff } from 'lucide-react';
 import Sheet from './Sheet';
 import { formatEventDate } from '../lib/format';
-import { useCreateOrder, useOrderTickets } from '../lib/queries';
+import { useAuth } from '../lib/authContext';
+import { keys, useCreateOrder, useMyPasses } from '../lib/queries';
 import { ngweeToZmw } from '../lib/mappers';
+import { summarisePasses } from '../lib/passes';
 
 const PROVIDERS = [
   { id: 'mtn', name: 'MTN MoMo', dot: '#FFCB05' },
@@ -17,18 +20,99 @@ function Spinner() {
   return <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" aria-hidden="true" />;
 }
 
+const celebrate = () =>
+  confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, disableForReducedMotion: true });
+
+const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+// One pass admits one person: the QR the host scans, the ID to type in when a
+// camera will not read it, and whether it has been used yet.
+function PassCard({ event, pass, index, total }) {
+  const inside = pass.status === 'checked_in';
+  return (
+    <div className="overflow-hidden rounded-3xl text-left shadow-[0_24px_60px_rgba(124,77,255,0.25)]">
+      <div className="brand-gradient px-5 py-4 text-white">
+        <p className="text-[13px] font-semibold text-white/80">
+          PAMP pass{total > 1 ? ` · ${index + 1} of ${total}` : ''}
+        </p>
+        <p className="mt-0.5 text-lg font-bold leading-snug">{event.name}</p>
+        <p className="text-sm text-white/90">
+          {formatEventDate(event.date, event.time)} · {event.area}
+        </p>
+      </div>
+      <div className="bg-white px-5 py-6 flex flex-col items-center text-[#0D0D0D]">
+        <QRCodeSVG value={pass.code} size={176} level="H" />
+        <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-black/50">Pass ID</p>
+        <p className="font-mono text-2xl font-bold tracking-[0.2em]">{pass.code}</p>
+        <p
+          className={`mt-4 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold ${
+            inside ? 'bg-[#16a34a]/12 text-[#15803d]' : 'bg-black/5 text-black/60'
+          }`}
+        >
+          {inside ? (
+            <>
+              <CheckCircle2 className="w-4 h-4" />
+              Checked in{pass.checkedInAt ? ` at ${timeOf(pass.checkedInAt)}` : ''}
+            </>
+          ) : (
+            'Not scanned yet · admits one'
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function TicketModal({ event, isOpen, onClose }) {
   const formId = useId();
+  const { user, offlineUserId } = useAuth();
+  const queryClient = useQueryClient();
   const [quantity, setQuantity] = useState(1);
   const [paymentProvider, setPaymentProvider] = useState('mtn');
   const [phone, setPhone] = useState('');
-  const [ticketIssued, setTicketIssued] = useState(null);
   const [pendingOrder, setPendingOrder] = useState(null);
+  const [justClaimed, setJustClaimed] = useState(false);
+  const [buyingMore, setBuyingMore] = useState(false);
+  const [page, setPage] = useState(0);
   const [error, setError] = useState('');
 
   const createOrder = useCreateOrder();
   const isProcessing = createOrder.isPending;
-  const { data: tickets = [] } = useOrderTickets(ticketIssued?.orderId);
+
+  // Passes come from the database rather than this sheet's state, so they are
+  // still here after a reload, on another phone, or with no signal at all.
+  const {
+    data: allPasses = [],
+    isError: offline,
+    isFetching,
+    refetch,
+  } = useMyPasses(user?.id ?? offlineUserId, {
+    watchEventId: isOpen && user ? event?.id : undefined,
+    fetch: Boolean(user),
+  });
+  const myPasses = useMemo(
+    () => allPasses.filter((p) => p.eventId === event?.id),
+    [allPasses, event?.id]
+  );
+  const summary = summarisePasses(myPasses);
+  const showingPasses = myPasses.length > 0 && !buyingMore && !pendingOrder;
+  const claimedButUnseen = justClaimed && myPasses.length === 0 && !pendingOrder;
+  const currentPage = Math.min(page, Math.max(0, myPasses.length - 1));
+
+  // The host's scan reaches this phone by polling. Mark the moment it lands.
+  const seenCheckIns = useRef(null);
+  useEffect(() => {
+    if (!isOpen) {
+      seenCheckIns.current = null;
+      return;
+    }
+    if (seenCheckIns.current !== null && summary.checkedIn > seenCheckIns.current) {
+      celebrate();
+      // The event's attended count moved too.
+      queryClient.invalidateQueries({ queryKey: keys.events });
+    }
+    seenCheckIns.current = summary.checkedIn;
+  }, [isOpen, summary.checkedIn, queryClient]);
 
   const unitPrice = event?.ticketPrice || 0;
   const totalPrice = unitPrice * quantity;
@@ -44,8 +128,8 @@ export default function TicketModal({ event, isOpen, onClose }) {
     setError('');
 
     try {
-      // The database sets the price, the fee and whether the order is paid.
-      // Nothing about money is trusted from this form.
+      // The database sets the price, the fee and whether the order is paid, and
+      // hands back an existing free pass rather than minting another.
       const order = await createOrder.mutateAsync({
         eventId: event.id,
         quantity,
@@ -54,22 +138,17 @@ export default function TicketModal({ event, isOpen, onClose }) {
       });
 
       if (order.status === 'paid') {
-        setTicketIssued({
-          orderId: order.id,
-          eventName: event.name,
-          date: event.date,
-          time: event.time,
-          area: event.area,
-          quantity: order.quantity,
-          totalPaid: ngweeToZmw(order.total_ngwee),
-          currency,
-        });
-        confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, disableForReducedMotion: true });
+        // New passes are added after existing ones, so open on the first new one.
+        setPage(buyingMore ? myPasses.length : 0);
+        setBuyingMore(false);
+        setJustClaimed(true);
+        celebrate();
       } else {
         // Paid events wait on a provider to confirm. Until one is connected the
         // order is real and held, but no pass is issued.
         setPendingOrder({
           id: order.id,
+          quantity: order.quantity,
           total: ngweeToZmw(order.total_ngwee),
           fee: ngweeToZmw(order.fee_ngwee),
         });
@@ -79,14 +158,21 @@ export default function TicketModal({ event, isOpen, onClose }) {
     }
   };
 
-  const handleReset = () => {
-    setTicketIssued(null);
+  const handleClose = () => {
     setPendingOrder(null);
+    setJustClaimed(false);
+    setBuyingMore(false);
+    setPage(0);
     setQuantity(1);
     setPhone('');
     setError('');
     onClose();
   };
+
+  let title = 'Get your pass';
+  if (pendingOrder) title = 'Waiting for payment';
+  else if (justClaimed && (showingPasses || claimedButUnseen)) title = "You're in";
+  else if (showingPasses) title = summary.allIn ? "You're checked in" : myPasses.length > 1 ? 'Your passes' : 'Your pass';
 
   const purchaseFooter = (
     <div className="flex items-center justify-between gap-4">
@@ -109,22 +195,52 @@ export default function TicketModal({ event, isOpen, onClose }) {
     </div>
   );
 
-  const issuedFooter = (
-    <button type="button" onClick={handleReset} className="btn-accent w-full">
+  const passesFooter = (
+    <div className="flex gap-3">
+      {!isFree && (
+        <button
+          type="button"
+          onClick={() => {
+            setBuyingMore(true);
+            setJustClaimed(false);
+            setError('');
+          }}
+          className="btn-secondary flex-1"
+        >
+          Buy more
+        </button>
+      )}
+      <button type="button" onClick={handleClose} className="btn-accent flex-1">
+        Done
+      </button>
+    </div>
+  );
+
+  const doneFooter = (
+    <button type="button" onClick={handleClose} className="btn-accent w-full">
       Done
     </button>
   );
 
+  let footer = purchaseFooter;
+  if (showingPasses) footer = passesFooter;
+  else if (pendingOrder || claimedButUnseen) footer = doneFooter;
+
   return (
-    <Sheet
-      open={isOpen && Boolean(event)}
-      onClose={handleReset}
-      title={ticketIssued ? "You're in" : pendingOrder ? 'Waiting for payment' : 'Get your pass'}
-      subtitle={event?.name}
-      footer={ticketIssued || pendingOrder ? issuedFooter : purchaseFooter}
-    >
-      {event && !ticketIssued && !pendingOrder && (
+    <Sheet open={isOpen && Boolean(event)} onClose={handleClose} title={title} subtitle={event?.name} footer={footer}>
+      {event && !showingPasses && !pendingOrder && !claimedButUnseen && (
         <form id={formId} onSubmit={handlePay} className="space-y-6">
+          {buyingMore && (
+            <button
+              type="button"
+              onClick={() => setBuyingMore(false)}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-text-secondary hover:text-white"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to my passes
+            </button>
+          )}
+
           <div className="flex items-center gap-4">
             <img src={event.image} alt="" className="w-16 h-16 rounded-2xl object-cover shrink-0" />
             <div className="min-w-0 flex-1">
@@ -137,7 +253,9 @@ export default function TicketModal({ event, isOpen, onClose }) {
           <div className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
             <div>
               <p className="font-medium text-white">Passes</p>
-              <p className="text-[13px] text-text-muted">{isFree ? 'Free entry' : `${currency} ${unitPrice} each`}</p>
+              <p className="text-[13px] text-text-muted">
+                {isFree ? 'Free entry · you can claim once' : `${currency} ${unitPrice} each`}
+              </p>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -154,8 +272,9 @@ export default function TicketModal({ event, isOpen, onClose }) {
               </span>
               <button
                 type="button"
-                onClick={() => setQuantity(quantity + 1)}
-                className="btn-icon w-9 h-9"
+                onClick={() => setQuantity(Math.min(10, quantity + 1))}
+                disabled={quantity === 10}
+                className="btn-icon w-9 h-9 disabled:opacity-40"
                 aria-label="Add a pass"
               >
                 <Plus className="w-4 h-4" />
@@ -232,7 +351,7 @@ export default function TicketModal({ event, isOpen, onClose }) {
           <dl className="card mt-6 space-y-2 p-4 text-left text-sm">
             <div className="flex justify-between">
               <dt className="text-text-muted">Passes</dt>
-              <dd className="font-semibold text-white">{quantity}</dd>
+              <dd className="font-semibold text-white">{pendingOrder.quantity}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-text-muted">Service fee</dt>
@@ -249,41 +368,69 @@ export default function TicketModal({ event, isOpen, onClose }) {
         </div>
       )}
 
-      {ticketIssued && (
+      {claimedButUnseen && (
         <div className="text-center">
           <span className="mx-auto flex w-14 h-14 items-center justify-center rounded-full bg-green/15 text-green">
             <CheckCircle2 className="w-7 h-7" />
           </span>
-          <p className="mt-3 text-text-secondary">Show this code at the door.</p>
+          <p className="mt-3 text-text-secondary">
+            Your pass is confirmed. It will show here as soon as your connection is back.
+          </p>
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className="btn-secondary mt-5">
+            {isFetching ? 'Checking…' : 'Try again'}
+          </button>
+        </div>
+      )}
 
-          <div className="mt-6 overflow-hidden rounded-3xl text-left shadow-[0_24px_60px_rgba(124,77,255,0.25)]">
-            <div className="brand-gradient px-5 py-4 text-white">
-              <p className="text-[13px] font-semibold text-white/80">PAMP pass</p>
-              <p className="mt-0.5 text-lg font-bold leading-snug">{ticketIssued.eventName}</p>
-              <p className="text-sm text-white/90">
-                {formatEventDate(ticketIssued.date, ticketIssued.time)} · {ticketIssued.area}
-              </p>
-            </div>
-            <div className="bg-white px-5 py-6 flex flex-col items-center text-[#0D0D0D]">
-              <QRCodeSVG value={tickets[0]?.code ?? ''} size={168} level="H" />
-              <dl className="mt-5 w-full grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-black/50">Pass ID</dt>
-                  <dd className="font-mono text-[13px] font-semibold">{tickets[0]?.code ?? '...'}</dd>
-                </div>
-                <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-black/50">Admits</dt>
-                  <dd className="text-[13px] font-semibold">{tickets.length || ticketIssued.quantity}</dd>
-                </div>
-                <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-black/50">Paid</dt>
-                  <dd className="text-[13px] font-semibold">
-                    {ticketIssued.totalPaid === 0 ? 'Free' : `${ticketIssued.currency} ${ticketIssued.totalPaid}`}
-                  </dd>
-                </div>
-              </dl>
-            </div>
+      {showingPasses && (
+        <div>
+          <p
+            role="status"
+            aria-live="polite"
+            className={`text-center text-sm ${summary.attended ? 'text-green' : 'text-text-secondary'}`}
+          >
+            {summary.allIn
+              ? "You're checked in. Enjoy the night!"
+              : summary.attended
+                ? `${summary.checkedIn} of ${summary.count} checked in`
+                : 'Show this at the door. It updates here when the host scans it.'}
+          </p>
+          {offline && (
+            <p className="mt-2 flex items-center justify-center gap-1.5 text-[13px] text-text-muted">
+              <WifiOff className="w-3.5 h-3.5" />
+              No connection. Showing the pass saved on this phone.
+            </p>
+          )}
+
+          <div className="mt-5">
+            <PassCard event={event} pass={myPasses[currentPage]} index={currentPage} total={myPasses.length} />
           </div>
+
+          {myPasses.length > 1 && (
+            <div className="mt-4 flex items-center justify-center gap-4">
+              <button
+                type="button"
+                onClick={() => setPage(Math.max(0, currentPage - 1))}
+                disabled={currentPage === 0}
+                className="btn-icon w-10 h-10 disabled:opacity-40"
+                aria-label="Previous pass"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <span className="text-sm text-text-secondary tabular-nums">
+                Pass {currentPage + 1} of {myPasses.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage(Math.min(myPasses.length - 1, currentPage + 1))}
+                disabled={currentPage === myPasses.length - 1}
+                className="btn-icon w-10 h-10 disabled:opacity-40"
+                aria-label="Next pass"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </Sheet>

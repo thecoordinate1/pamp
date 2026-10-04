@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { MailCheck } from 'lucide-react';
 import Sheet from './Sheet';
 import { useAuth } from '../lib/authContext';
+import { inviteUrl } from '../lib/invite';
 
 const MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -27,10 +28,25 @@ const friendlyError = (message = '') => {
 
 // Browsing PAMP needs no account. This appears only when someone tries to do
 // something that writes: RSVP, buy a pass, request a facecard or host.
-export default function SignInSheet({ open, onClose, action = 'continue' }) {
+// `initialMode` opens it on sign-up for people arriving through an invite, who
+// almost certainly have no account yet. `referral` is the invite's sign-up
+// metadata and `inviteEventId` the event to return them to after confirming.
+export default function SignInSheet({
+  open,
+  onClose,
+  action = 'continue',
+  initialMode = 'signin',
+  referral,
+  inviteEventId,
+}) {
   const { signUpWithEmail, signInWithEmail, resendConfirmation, resetPassword, configured } = useAuth();
 
-  const [mode, setMode] = useState('signin'); // 'signin' | 'signup' | 'forgot' | 'sent'
+  const [mode, setMode] = useState(initialMode); // 'signin' | 'signup' | 'forgot' | 'sent'
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setMode(initialMode);
+  }
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -74,7 +90,13 @@ export default function SignInSheet({ open, onClose, action = 'continue' }) {
       }
 
       if (mode === 'signup') {
-        const { data, error: err } = await signUpWithEmail(email.trim(), password);
+        // The invite's code goes with the sign-up, and the database records
+        // who brought this person in. The code is kept until they are signed
+        // in, so a second attempt with a corrected email is still credited.
+        const { data, error: err } = await signUpWithEmail(email.trim(), password, {
+          metadata: referral,
+          redirectTo: inviteEventId ? inviteUrl({ eventId: inviteEventId }) : undefined,
+        });
         if (err) throw err;
         if (data?.session) {
           close();
@@ -131,7 +153,13 @@ export default function SignInSheet({ open, onClose, action = 'continue' }) {
       open={open}
       onClose={close}
       title={title}
-      subtitle={mode === 'signin' ? `You need an account to ${action}.` : undefined}
+      subtitle={
+        mode === 'signin'
+          ? `You need an account to ${action}.`
+          : mode === 'signup' && action !== 'continue'
+            ? `Create a free account to ${action}.`
+            : undefined
+      }
     >
       {mode === 'sent' ? (
         <div className="py-2 text-center">

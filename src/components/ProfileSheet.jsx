@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, LogOut } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { BarChart3, Check, Copy, LogOut, Share2 } from 'lucide-react';
 import Sheet from './Sheet';
 import { useAuth } from '../lib/authContext';
-import { useMyProfile, useUpdateProfile } from '../lib/queries';
+import { inviteUrl } from '../lib/invite';
+import { useMyProfile, useMyReferral, useUpdateProfile } from '../lib/queries';
+import { useShareLink } from '../lib/useShareLink';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram' },
@@ -15,6 +18,55 @@ const PLATFORMS = [
 
 // Mirrors the check constraint on profiles.social_handle.
 const HANDLE_RE = /^[A-Za-z0-9._+-]{1,40}$/;
+
+// This person's referral code and its QR. Both are fixed for the life of the
+// account, so anything already shared keeps crediting them.
+function InviteCard({ userId }) {
+  const { data: referral } = useMyReferral(userId);
+  const url = referral?.code ? inviteUrl({ code: referral.code }) : '';
+  const { copy, share, copied, canShare, error } = useShareLink(url, {
+    title: 'Join me on PAMP',
+    text: 'Find the best events in Zambia on PAMP',
+  });
+
+  if (!referral?.code) return null;
+
+  return (
+    <section aria-labelledby="invite-heading" className="card mb-6 p-4">
+      <div className="flex items-center gap-4">
+        <div className="shrink-0 rounded-2xl bg-white p-2">
+          <QRCodeSVG value={url} size={88} level="M" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 id="invite-heading" className="text-[13px] font-medium text-text-muted">
+            Your invite code
+          </h3>
+          <p className="font-mono text-2xl font-bold tracking-[0.15em] text-white">{referral.code}</p>
+          <p className="text-[13px] text-text-muted">
+            {referral.joined === 1 ? '1 friend has' : `${referral.joined} friends have`} joined with it
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 flex gap-2">
+        <button type="button" onClick={copy} className="btn-secondary flex-1">
+          {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+        {canShare && (
+          <button type="button" onClick={share} className="btn-secondary flex-1">
+            <Share2 className="w-4 h-4" />
+            Invite
+          </button>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-red">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
 
 export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigate }) {
   const { user, signOut } = useAuth();
@@ -104,6 +156,7 @@ export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigat
       subtitle="This is what other people at an event see."
       footer={footer}
     >
+      <InviteCard userId={user?.id} />
       {isLoading ? (
         <div className="space-y-4" aria-hidden="true">
           {[0, 1, 2].map((i) => (

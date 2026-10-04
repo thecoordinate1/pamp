@@ -3,6 +3,7 @@ import {
   ngweeToZmw,
   rowToAttendee,
   rowToEvent,
+  rowToPass,
   zmwToNgwee,
 } from './mappers';
 
@@ -84,6 +85,11 @@ describe('rowToEvent', () => {
     expect(rowToEvent({ ...row, rsvp_count: null }).rsvpCount).toBe(0);
   });
 
+  it('carries how many people attended, defaulting to zero', () => {
+    expect(rowToEvent({ ...row, attended_count: 12 }).attendedCount).toBe(12);
+    expect(rowToEvent(row).attendedCount).toBe(0);
+  });
+
   it('returns null for a missing row', () => {
     expect(rowToEvent(null)).toBeNull();
   });
@@ -142,5 +148,45 @@ describe('rowToAttendee', () => {
 
   it('falls back to Guest when a profile is not readable', () => {
     expect(rowToAttendee({ user_id: 'u2', profiles: null }).name).toBe('Guest');
+  });
+});
+
+describe('rowToPass', () => {
+  it('maps a ticket row onto the pass shape', () => {
+    expect(
+      rowToPass({
+        id: 't1',
+        code: '4AAD6277',
+        status: 'checked_in',
+        checked_in_at: '2026-10-04T19:14:00Z',
+        event_id: 'e1',
+        order_id: 'o1',
+        created_at: '2026-10-01T10:00:00Z',
+      })
+    ).toEqual({
+      id: 't1',
+      code: '4AAD6277',
+      status: 'checked_in',
+      checkedInAt: '2026-10-04T19:14:00Z',
+      eventId: 'e1',
+      orderId: 'o1',
+      createdAt: '2026-10-01T10:00:00Z',
+      event: null,
+    });
+  });
+
+  it('keeps a copy of the event so the pass opens offline', () => {
+    const pass = rowToPass({
+      id: 't3',
+      code: 'C0FFEE12',
+      status: 'valid',
+      event_id: 'e9',
+      events: { id: 'e9', name: 'Rooftop Sundowner', starts_on: '2026-10-10', start_time: '18:00', area: 'Rhodes Park', ticket_price_ngwee: 0 },
+    });
+    expect(pass.event).toMatchObject({ id: 'e9', name: 'Rooftop Sundowner', date: '2026-10-10', ticketPrice: 0 });
+  });
+
+  it('treats a pass nobody has scanned as not checked in', () => {
+    expect(rowToPass({ id: 't2', code: 'X', status: 'valid', event_id: 'e1' }).checkedInAt).toBeNull();
   });
 });

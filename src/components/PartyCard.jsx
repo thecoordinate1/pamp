@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Check, Crown, MapPin, Users } from 'lucide-react';
+import { Check, CheckCircle2, Crown, MapPin, Share2, Ticket, Users } from 'lucide-react';
 import VibeRating from './VibeRating';
 import { formatEventDate } from '../lib/format';
+import { summarisePasses } from '../lib/passes';
 
 export default function PartyCard({
   party,
@@ -9,11 +10,15 @@ export default function PartyCard({
   isRSVPed,
   onFacecard,
   onGetTickets,
-  onViewAttendees
+  onViewAttendees,
+  onShare,
+  // This person's passes for the event, if they hold any.
+  passes,
 }) {
   const [imgLoaded, setImgLoaded] = useState(false);
   const isFree = !party.ticketPrice;
   const priceText = isFree ? 'Free' : `${party.currency || 'ZMW'} ${party.ticketPrice}`;
+  const mine = summarisePasses(passes);
 
   return (
     <article className="group flex flex-col">
@@ -31,9 +36,16 @@ export default function PartyCard({
         <span className="glass absolute top-3 right-3 rounded-full px-3 py-1 text-[13px] font-semibold text-white">
           {priceText}
         </span>
+        {mine.attended && (
+          <span className="glass absolute top-3 left-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold text-green">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            You attended
+          </span>
+        )}
         <span className="absolute bottom-3 left-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-white/90">
           <Users className="w-3.5 h-3.5" />
           {party.rsvpCount} going
+          {party.attendedCount > 0 && <> · {party.attendedCount} attended</>}
         </span>
       </div>
 
@@ -62,11 +74,28 @@ export default function PartyCard({
             <Users className="w-3.5 h-3.5" />
             Who's going
           </button>
+          <button
+            type="button"
+            onClick={() => onShare(party)}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-[13px] font-semibold bg-white/6 text-text-secondary hover:text-white hover:bg-white/10 transition-colors duration-200"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            Share
+          </button>
         </div>
 
         <div className="mt-auto pt-5 flex items-center gap-2">
           <button type="button" onClick={() => onGetTickets(party)} className="btn-accent flex-1">
-            {isFree ? 'Get free pass' : 'Get pass'}
+            {mine.count > 0 ? (
+              <>
+                <Ticket className="w-4 h-4" />
+                {mine.count > 1 ? 'Show passes' : 'Show pass'}
+              </>
+            ) : isFree ? (
+              'Get free pass'
+            ) : (
+              'Get pass'
+            )}
           </button>
           <button
             type="button"
