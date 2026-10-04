@@ -174,9 +174,13 @@ export default function CheckInSheet({ open, onClose }) {
             <button
               type="button"
               onClick={async () => {
-                await undo.mutateAsync(result.code);
-                setResult(null);
-                lastCodeRef.current = '';
+                try {
+                  await undo.mutateAsync(result.code);
+                  setResult(null);
+                  lastCodeRef.current = '';
+                } catch (err) {
+                  setError(err.message ?? 'Could not undo that check-in.');
+                }
               }}
               className="text-sm font-medium text-text-secondary hover:text-white shrink-0"
             >

@@ -102,8 +102,10 @@ export default function SignInSheet({
           close();
           return;
         }
-        setMode('signin');
-        setNotice('Account created! Sign in with your details.');
+        // Confirmation is on, so no session is issued yet. Show the
+        // "Check your email" screen rather than landing on sign-in,
+        // where they would immediately hit an "email not confirmed" error.
+        setMode('sent');
         return;
       }
 
