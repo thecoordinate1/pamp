@@ -899,3 +899,33 @@ export function useReviewProfilePhoto() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'profiles-to-verify'] }),
   });
 }
+
+// Payments Lenco took that did not match their order, so no pass was issued:
+// each needs a person, usually to refund. Null until the migration runs.
+export function usePaymentsToReview(enabled) {
+  return useQuery({
+    queryKey: ['admin', 'payments-to-review'],
+    enabled: Boolean(enabled),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('payments_to_review');
+      if (error?.code === MISSING_FUNCTION) return null;
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+export function useResolvePaymentReview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ reviewId, resolution }) => {
+      const { data, error } = await supabase.rpc('resolve_payment_review', {
+        p_review: reviewId,
+        p_resolution: resolution,
+      });
+      if (error) throw error;
+      return Boolean(data);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'payments-to-review'] }),
+  });
+}

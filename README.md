@@ -86,14 +86,13 @@ Until the webhook is set up, payments still complete: the app's polling finds th
 
 ### Check before going live
 
-- **The status endpoint path.** `getByReference` in `lenco.ts` uses `GET /collections/status/<reference>`, written from memory because Lenco's "get collection by reference" page was not available. Confirm it against that page and in the sandbox. If it is wrong, every payment stays pending.
-- **Collection webhook events.** Lenco's published event list has no collection event, only `transaction.*`. The webhook reads an order id from `data.reference` or `data.clientReference` and ignores events that carry none, so it works with either shape, but check what a sandbox collection actually sends.
+- **One sandbox payment, end to end.** The request body, the status endpoint (`GET /collections/status/<reference>`), the webhook events (`collection.successful`, `collection.failed`, `collection.settled`, each with our order id in `data.reference`) and the signature scheme were checked against [Lenco's docs](https://lenco-api.readme.io/v2.0/reference/get-collection-by-reference) on 2026-10-05. What the docs cannot show is a real run: pay one sandbox order and watch it reach `paid`.
 - **Fees.** Collections default to the merchant bearing Lenco's fee, so it comes out of PAMP's takings on top of PAMP's own service fee. Lenco's `bearer` option can pass it to the customer instead.
 
 ### Known gaps
 
-- If a customer approves after their order's hold has run out, the order has expired and no pass is issued. The app shows "we need to check this payment" and the function logs the order and Lenco reference, so it has to be refunded or fixed by hand.
-- Mobile money accounts that Lenco makes verify by one-time PIN are not handled. Lenco's response schema lists only `pending`, `successful`, `failed` and `pay-offline`.
+- If a customer approves after their order's hold has run out, or Lenco reports a different amount or reference, no pass is issued. The case is recorded in `payment_reviews` and listed on the admin page under "Payments to check", with the buyer, their number and Lenco's reference. Refund it in the Lenco dashboard, then mark it dealt with.
+- Mobile money accounts that Lenco makes verify by one-time PIN are not handled. Lenco's current docs list only `pending`, `successful`, `failed` and `pay-offline`, with no way to submit a PIN.
 - Card payments.
 
 ### Expiring unpaid orders

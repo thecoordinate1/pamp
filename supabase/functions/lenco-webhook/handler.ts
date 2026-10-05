@@ -2,7 +2,7 @@
 // the order and its status come from Lenco's API, not from this request.
 //
 // Lenco treats anything but 200, 201 or 202 as "not received" and retries every
-// hour for a day. So events that are not ours, or that a person has to look at,
+// 30 minutes for a day. So events that are not ours, or that a person has to look at,
 // are acknowledged with 200; only a transient failure (Lenco or the database
 // being down) answers 500 so the retry can help.
 import {

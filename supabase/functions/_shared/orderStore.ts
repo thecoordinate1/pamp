@@ -28,5 +28,13 @@ export function createOrderStore(db: Db): OrderStore {
       const { error } = await db.from('orders').update({ status: 'failed' }).eq('id', id).eq('status', 'pending');
       if (error) throw error;
     },
+    async flagReview({ orderId, reason, providerReference, amount, currency }) {
+      // Admins work through these on the admin page (payments_to_review).
+      const { error } = await db.from('payment_reviews').upsert(
+        { order_id: orderId, reason, provider_reference: providerReference, amount, currency },
+        { onConflict: 'order_id,reason', ignoreDuplicates: true }
+      );
+      if (error) throw error;
+    },
   };
 }

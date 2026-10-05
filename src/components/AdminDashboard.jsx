@@ -7,7 +7,9 @@ import {
   usePlatformEvents,
   usePlatformSignups,
   usePlatformStats,
+  usePaymentsToReview,
   useProfilesToVerify,
+  useResolvePaymentReview,
   useReviewProfilePhoto,
 } from '../lib/queries';
 
@@ -60,6 +62,112 @@ function SignupTrend({ rows }) {
         </div>
       )}
     </div>
+  );
+}
+
+const REVIEW_REASON = {
+  order_not_payable: 'Paid after the order expired or was cancelled',
+  amount_mismatch: 'Paid a different amount from the order',
+  reference_mismatch: 'Payment reference does not match the order',
+};
+
+// Money Lenco collected that did not fit its order, so no pass was issued.
+// Usually the fix is a refund through the Lenco dashboard, then marking it here.
+function PaymentChecks() {
+  const { data: rows, isError } = usePaymentsToReview(true);
+  const resolve = useResolvePaymentReview();
+  const [notes, setNotes] = useState({});
+  const [error, setError] = useState('');
+
+  // Null: the migration that adds the list has not run yet.
+  if (rows == null || isError) return null;
+
+  const done = async (row) => {
+    const note = (notes[row.review_id] ?? '').trim();
+    if (!note) {
+      setError('Say what you did, such as "Refunded K52.50 through Lenco".');
+      return;
+    }
+    setError('');
+    try {
+      await resolve.mutateAsync({ reviewId: row.review_id, resolution: note });
+    } catch (err) {
+      setError(err.message ?? 'Could not save that. Try again.');
+    }
+  };
+
+  return (
+    <section aria-labelledby="payment-checks-heading">
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 id="payment-checks-heading" className="font-semibold text-white">Payments to check</h3>
+        <p className="text-[13px] text-text-muted">{rows.length} open</p>
+      </div>
+      {error && (
+        <p role="alert" className="mb-3 text-sm text-red">
+          {error}
+        </p>
+      )}
+      {rows.length === 0 ? (
+        <div className="card p-6 text-center text-text-secondary">No payments need checking.</div>
+      ) : (
+        <ul className="space-y-3">
+          {rows.map((row) => (
+            <li key={row.review_id} className="card border-amber/25 p-4">
+              <p className="font-semibold text-white">{REVIEW_REASON[row.reason] ?? row.reason}</p>
+              <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+                <div>
+                  <dt className="text-[13px] text-text-muted">Buyer</dt>
+                  <dd className="text-white">{row.buyer_name || 'No name'} · {row.buyer_msisdn || 'no number'}</dd>
+                </div>
+                <div>
+                  <dt className="text-[13px] text-text-muted">Event</dt>
+                  <dd className="text-white truncate">{row.event_name || 'Deleted event'}</dd>
+                </div>
+                <div>
+                  <dt className="text-[13px] text-text-muted">Lenco paid / order total</dt>
+                  <dd className="text-white">
+                    {row.currency} {row.amount} / {kwacha(row.order_total_ngwee)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[13px] text-text-muted">Lenco reference</dt>
+                  <dd className="font-mono text-white">{row.provider_reference || '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-[13px] text-text-muted">Order</dt>
+                  <dd className="text-white">
+                    {row.order_status} · <span className="font-mono text-[13px]">{row.order_id.slice(0, 8)}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[13px] text-text-muted">Flagged</dt>
+                  <dd className="text-white">{new Date(row.flagged_at).toLocaleString('en-ZM')}</dd>
+                </div>
+              </dl>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <label htmlFor={`resolve-${row.review_id}`} className="sr-only">What you did</label>
+                <input
+                  id={`resolve-${row.review_id}`}
+                  value={notes[row.review_id] ?? ''}
+                  onChange={(e) => setNotes((n) => ({ ...n, [row.review_id]: e.target.value }))}
+                  maxLength={500}
+                  placeholder="What you did, e.g. refunded through Lenco"
+                  className="input-dark flex-1"
+                />
+                <button
+                  type="button"
+                  disabled={resolve.isPending}
+                  onClick={() => done(row)}
+                  className="btn-secondary px-4"
+                >
+                  Mark dealt with
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -221,6 +329,8 @@ export default function AdminDashboard() {
           payment. No mobile money provider is connected yet, so these cannot settle.
         </p>
       )}
+
+      <PaymentChecks />
 
       <PhotoChecks />
 

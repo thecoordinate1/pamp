@@ -37,10 +37,21 @@ export type OrderRow = {
 
 // What the handlers need from the database. index.ts backs it with the service
 // role; tests pass a fake.
+export type ReviewReason = 'order_not_payable' | 'amount_mismatch' | 'reference_mismatch';
+
 export type OrderStore = {
   getOrder(id: string): Promise<OrderRow | null>;
   markPaid(id: string, reference: string): Promise<void>;
   markFailed(id: string): Promise<void>;
+  // Records money a person has to sort out, for the admin page. Once per order
+  // and reason, however many times the webhook and polls find it.
+  flagReview(input: {
+    orderId: string;
+    reason: ReviewReason;
+    providerReference: string | null;
+    amount: string;
+    currency: string;
+  }): Promise<void>;
 };
 
 export type LencoClient = {
@@ -188,10 +199,10 @@ export function createLencoClient({
       return collection;
     },
 
-    // UNVERIFIED PATH: Lenco's "get collection by reference" page was not
-    // available when this was written. Confirm it against
+    // GET /collections/status/{reference}, checked against
     // https://lenco-api.readme.io/v2.0/reference/get-collection-by-reference
-    // (and in the sandbox) before going live.
+    // on 2026-10-05. Answers 404 with status false when Lenco has no such
+    // collection. Still worth one sandbox run before going live.
     async getByReference(reference) {
       const { res, json } = await call(`/collections/status/${encodeURIComponent(reference)}`, { method: 'GET' });
       if (res.status === 404) return null;
@@ -218,9 +229,20 @@ export async function settleCollection(
   collection: Collection,
   store: OrderStore
 ): Promise<Settlement> {
+  const review = async (reason: ReviewReason): Promise<Settlement> => {
+    await store.flagReview({
+      orderId: order.id,
+      reason,
+      providerReference: collection.lencoReference ?? collection.id,
+      amount: collection.amount,
+      currency: collection.currency,
+    });
+    return { state: 'review', message: reason };
+  };
+
   if (collection.reference !== order.id) {
     console.error('collection reference does not match its order', order.id, collection.reference);
-    return { state: 'review', message: 'reference_mismatch' };
+    return review('reference_mismatch');
   }
 
   if (collection.status === 'failed') {
@@ -239,7 +261,7 @@ export async function settleCollection(
   if (order.status !== 'pending') {
     // The customer paid for an order that has expired, failed or been refunded.
     console.error('payment for an order that is not payable', order.id, order.status, collection.lencoReference);
-    return { state: 'review', message: 'order_not_payable' };
+    return review('order_not_payable');
   }
 
   if (collection.currency !== 'ZMW' || lencoAmountToNgwee(collection.amount) !== order.total_ngwee) {
@@ -247,7 +269,7 @@ export async function settleCollection(
       'payment does not match the order',
       order.id, collection.amount, collection.currency, order.total_ngwee, collection.lencoReference
     );
-    return { state: 'review', message: 'amount_mismatch' };
+    return review('amount_mismatch');
   }
 
   await store.markPaid(order.id, `lenco:${collection.lencoReference ?? collection.id}`);

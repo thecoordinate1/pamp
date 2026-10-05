@@ -145,6 +145,7 @@ describe('settleCollection', () => {
     getOrder: vi.fn(async () => order),
     markPaid: vi.fn(async () => {}),
     markFailed: vi.fn(async () => {}),
+    flagReview: vi.fn(async () => {}),
   }) satisfies OrderStore;
   const quiet = () => vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -166,6 +167,13 @@ describe('settleCollection', () => {
       const store = makeStore();
       expect((await settleCollection(order, col(bad), store)).state).toBe('review');
       expect(store.markPaid).not.toHaveBeenCalled();
+      expect(store.flagReview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: ORDER,
+          reason: 'reference' in bad ? 'reference_mismatch' : 'amount_mismatch',
+          providerReference: '240730008',
+        })
+      );
     }
     err.mockRestore();
   });
@@ -175,6 +183,14 @@ describe('settleCollection', () => {
     const store = makeStore();
     expect((await settleCollection({ ...order, status: 'expired' }, col(), store)).state).toBe('review');
     expect(store.markPaid).not.toHaveBeenCalled();
+    // Recorded for an admin to refund, with what Lenco says was paid.
+    expect(store.flagReview).toHaveBeenCalledWith({
+      orderId: ORDER,
+      reason: 'order_not_payable',
+      providerReference: '240730008',
+      amount: '55.00',
+      currency: 'ZMW',
+    });
     expect(err).toHaveBeenCalled();
     err.mockRestore();
   });

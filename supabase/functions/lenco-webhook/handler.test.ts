@@ -19,6 +19,7 @@ const setup = ({ row = order as OrderRow | null, found = collection as Collectio
     getOrder: vi.fn(async () => row),
     markPaid: vi.fn(async () => {}),
     markFailed: vi.fn(async () => {}),
+    flagReview: vi.fn(async () => {}),
   } satisfies OrderStore;
   const lenco = {
     initiate: vi.fn(),
