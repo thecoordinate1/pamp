@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
-import { ArrowLeft, CheckCircle2, Clock, Minus, Plus, WifiOff } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clock, Minus, Plus, Sparkles, WifiOff } from 'lucide-react';
 import Sheet from './Sheet';
 import LocationCard from './LocationCard';
 import PassCarousel from './PassCarousel';
@@ -14,13 +14,16 @@ import {
   useCreateOrder,
   useEventPrivate,
   useMyPasses,
+  useMyPoints,
   useMyProfile,
   useMyReferral,
+  usePlatformSettings,
   useReclaimPass,
   useSharePass,
 } from '../lib/queries';
-import { ngweeToZmw } from '../lib/mappers';
+import { ngweeToZmw, zmwToNgwee } from '../lib/mappers';
 import { summarisePasses } from '../lib/passes';
+import { quoteWithPoints } from '../lib/points';
 import { shareOrCopy } from '../lib/useShareLink';
 
 const PROVIDERS = [
@@ -57,6 +60,7 @@ export default function TicketModal({ event, isOpen, onClose }) {
   // Per-pass messages after sending or taking back, keyed by pass id.
   const [notices, setNotices] = useState({});
   const [busyCode, setBusyCode] = useState(null);
+  const [usePoints, setUsePoints] = useState(false);
   const sharePass = useSharePass();
   const reclaimPass = useReclaimPass();
   const { data: profile } = useMyProfile(user?.id);
@@ -106,9 +110,25 @@ export default function TicketModal({ event, isOpen, onClose }) {
   const currency = event?.currency || 'ZMW';
   const isFree = unitPrice === 0;
 
+  // Points take money off paid passes, for verified profiles. The quote mirrors
+  // create_order; the database works out the real figures.
+  const wantsPoints = isOpen && !isFree && Boolean(user);
+  const { data: points } = useMyPoints(wantsPoints ? user?.id : null);
+  const { data: settings } = usePlatformSettings(wantsPoints);
+  const verified = Boolean(profile?.identity_verified_at);
+  const quote = quoteWithPoints({
+    subtotalNgwee: zmwToNgwee(totalPrice),
+    balance: points?.balance ?? 0,
+    pointValueNgwee: points?.pointValueNgwee,
+    settings,
+  });
+  // Waits for the fee settings, or the quote would leave the fee out.
+  const pointsApplied = usePoints && verified && quote.points > 0 && Boolean(settings);
+  const paidInPoints = pointsApplied && quote.total === 0;
+
   const handlePay = async (e) => {
     e?.preventDefault();
-    if (!isFree && paymentProvider !== 'card' && !phone.trim()) {
+    if (!isFree && !paidInPoints && paymentProvider !== 'card' && !phone.trim()) {
       setError('Enter your mobile money number.');
       return;
     }
@@ -121,7 +141,10 @@ export default function TicketModal({ event, isOpen, onClose }) {
         eventId: event.id,
         quantity,
         method: isFree ? 'free' : paymentProvider,
-        msisdn: paymentProvider === 'card' ? null : phone,
+        msisdn: paymentProvider === 'card' || paidInPoints ? null : phone,
+        // The whole balance is offered; the database uses only what the order
+        // needs, so a stale quote can never under- or over-spend.
+        points: pointsApplied ? points.balance : 0,
       });
 
       if (order.status === 'paid') {
@@ -138,6 +161,8 @@ export default function TicketModal({ event, isOpen, onClose }) {
           quantity: order.quantity,
           total: ngweeToZmw(order.total_ngwee),
           fee: ngweeToZmw(order.fee_ngwee),
+          pointsUsed: order.points_used ?? 0,
+          pointsOff: ngweeToZmw(order.points_discount_ngwee ?? 0),
         });
       }
     } catch (err) {
@@ -189,6 +214,7 @@ export default function TicketModal({ event, isOpen, onClose }) {
     setQuantity(1);
     setPhone('');
     setError('');
+    setUsePoints(false);
     onClose();
   };
 
@@ -200,8 +226,10 @@ export default function TicketModal({ event, isOpen, onClose }) {
   const purchaseFooter = (
     <div className="flex items-center justify-between gap-4">
       <div>
-        <p className="text-[13px] text-text-muted">Total</p>
-        <p className="text-xl font-bold tracking-tight text-white">{isFree ? 'Free' : `${currency} ${totalPrice}`}</p>
+        <p className="text-[13px] text-text-muted">{pointsApplied ? 'Total with fee, after points' : 'Total'}</p>
+        <p className="text-xl font-bold tracking-tight text-white">
+          {isFree ? 'Free' : pointsApplied ? `${currency} ${ngweeToZmw(quote.total)}` : `${currency} ${totalPrice}`}
+        </p>
       </div>
       <button type="submit" form={formId} disabled={isProcessing} className="btn-accent px-6">
         {isProcessing ? (
@@ -211,8 +239,10 @@ export default function TicketModal({ event, isOpen, onClose }) {
           </>
         ) : isFree ? (
           'Claim free pass'
+        ) : paidInPoints ? (
+          'Get pass with points'
         ) : (
-          `Pay ${currency} ${totalPrice}`
+          `Pay ${currency} ${pointsApplied ? ngweeToZmw(quote.total) : totalPrice}`
         )}
       </button>
     </div>
@@ -305,7 +335,50 @@ export default function TicketModal({ event, isOpen, onClose }) {
             </div>
           </div>
 
-          {!isFree && (
+          {!isFree && points?.balance > 0 && (
+            <div className="rounded-2xl bg-white/5 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-5 h-5 shrink-0 text-accent" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-white">
+                    {points.balance.toLocaleString()} points
+                    <span className="font-normal text-text-muted">
+                      {' '}· worth {currency} {ngweeToZmw(points.balance * points.pointValueNgwee).toLocaleString()}
+                    </span>
+                  </p>
+                  <p className="text-[13px] text-text-muted">
+                    {!verified
+                      ? 'Get verified to spend them: add a profile photo and an admin checks it is you.'
+                      : pointsApplied
+                        ? paidInPoints
+                          ? `Uses ${quote.points.toLocaleString()} points and covers the whole pass.`
+                          : `Uses all ${quote.points.toLocaleString()} and takes ${currency} ${ngweeToZmw(quote.discount)} off.`
+                        : 'Use them to take money off this pass.'}
+                  </p>
+                </div>
+                {verified && (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={pointsApplied}
+                    aria-label="Use my points"
+                    onClick={() => setUsePoints((on) => !on)}
+                    className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ${
+                      pointsApplied ? 'bg-accent' : 'bg-white/15'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform duration-200 ${
+                        pointsApplied ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!isFree && !paidInPoints && (
             <>
               <fieldset>
                 <legend className="field-label">Pay with</legend>
@@ -380,6 +453,12 @@ export default function TicketModal({ event, isOpen, onClose }) {
               <dt className="text-text-muted">Service fee</dt>
               <dd className="font-semibold text-white">{currency} {pendingOrder.fee}</dd>
             </div>
+            {pendingOrder.pointsUsed > 0 && (
+              <div className="flex justify-between">
+                <dt className="text-text-muted">{pendingOrder.pointsUsed.toLocaleString()} points</dt>
+                <dd className="font-semibold text-green">&minus;{currency} {pendingOrder.pointsOff}</dd>
+              </div>
+            )}
             <div className="flex justify-between">
               <dt className="text-text-muted">Total due</dt>
               <dd className="font-semibold text-white">{currency} {pendingOrder.total}</dd>
@@ -387,6 +466,7 @@ export default function TicketModal({ event, isOpen, onClose }) {
           </dl>
           <p className="mt-3 text-[13px] text-text-muted">
             Your pass is issued automatically once payment is confirmed.
+            {pendingOrder.pointsUsed > 0 && ' If the order is not paid in time, your points come back.'}
           </p>
         </div>
       )}

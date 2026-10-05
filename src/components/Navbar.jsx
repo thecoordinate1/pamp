@@ -1,14 +1,18 @@
 import { Ticket } from 'lucide-react';
 import { NAV_ITEMS } from './navItems';
+import { Avatar } from './Avatar';
 import { useAuth } from '../lib/authContext';
+import { useMyProfile, usePhotoUrls } from '../lib/queries';
 
 // Top bar: wordmark everywhere, section links on desktop (phones use the TabBar).
 // The account control sits here at every width, because the TabBar already
 // carries four tabs and a fifth crowds it on a phone.
 export default function Navbar({ activeSection, onNavigate, onOpenProfile, onSignIn, passCount = 0, onOpenPasses }) {
   const { user, loading } = useAuth();
-  const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || '';
-  const initial = (displayName.match(/[A-Za-z0-9]/)?.[0] ?? '?').toUpperCase();
+  const { data: profile } = useMyProfile(user?.id);
+  const { data: photoUrls } = usePhotoUrls([profile?.avatar_path]);
+  const displayName =
+    profile?.display_name || user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || '';
 
   return (
     <header className="glass border-x-0 border-t-0 fixed top-0 inset-x-0 z-50 pt-[env(safe-area-inset-top)]">
@@ -80,9 +84,9 @@ export default function Navbar({ activeSection, onNavigate, onOpenProfile, onSig
               onClick={onOpenProfile}
               title={displayName || 'Your profile'}
               aria-label="Your profile"
-              className="brand-gradient w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-sm font-bold text-white transition-transform duration-200 active:scale-95"
+              className="shrink-0 rounded-full transition-transform duration-200 active:scale-95"
             >
-              {initial}
+              <Avatar src={photoUrls?.get(profile?.avatar_path)} name={displayName} className="w-9 h-9 text-sm" />
             </button>
           ) : (
             <button

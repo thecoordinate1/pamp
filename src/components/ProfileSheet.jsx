@@ -1,11 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { BarChart3, Check, Copy, LogOut, Share2 } from 'lucide-react';
+import { BarChart3, Camera, Check, Copy, LogOut, Share2, Sparkles } from 'lucide-react';
 import Sheet from './Sheet';
+import { Avatar, VerifiedBadge } from './Avatar';
 import { useAuth } from '../lib/authContext';
 import { inviteUrl } from '../lib/invite';
-import { useMyProfile, useMyReferral, useUpdateProfile } from '../lib/queries';
+import { ngweeToZmw } from '../lib/mappers';
+import { describePointEntry } from '../lib/points';
+import {
+  useMyPhotoReview,
+  useMyPoints,
+  useMyProfile,
+  useMyReferral,
+  usePhotoUrls,
+  usePlatformSettings,
+  usePointHistory,
+  useSetAvatar,
+  useUpdateProfile,
+  useUsernameAvailable,
+} from '../lib/queries';
 import { useShareLink } from '../lib/useShareLink';
+import { cleanUsername, usernameProblem } from '../lib/username';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram' },
@@ -68,6 +83,145 @@ function InviteCard({ userId }) {
   );
 }
 
+// The profile picture, and where the verified badge stands. The picture is the
+// facecard selfie, and changing it here sends it back to be checked.
+function PhotoCard({ userId, profile }) {
+  const setAvatar = useSetAvatar(userId);
+  const { data: reviewedPath } = useMyPhotoReview(userId);
+  const path = profile?.avatar_path ?? null;
+  const { data: photoUrls } = usePhotoUrls([path]);
+  const inputRef = useRef(null);
+  const [error, setError] = useState('');
+
+  // identity_verified_at is missing until the migration that adds badges runs.
+  const hasBadges = Boolean(profile) && 'identity_verified_at' in profile;
+  const verified = Boolean(profile?.identity_verified_at);
+
+  let status = 'Hosts of your events see it. Other guests see it only where you choose to be listed.';
+  if (hasBadges) {
+    if (verified) status = 'An admin checked that you match your photo.';
+    else if (path && reviewedPath === path) status = 'This photo did not pass the check. Use a clear photo of just your face.';
+    else if (path) status = 'An admin will check this photo is you. Then you get the badge and can spend points.';
+    else status = 'Add a clear photo of your face. Once an admin checks it, you get the badge and can spend points.';
+  }
+
+  const choose = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setError('');
+    try {
+      await setAvatar.mutateAsync(file);
+    } catch (err) {
+      setError(err.message ?? 'Could not save that photo. Try another one.');
+    }
+  };
+
+  return (
+    <section aria-label="Profile picture" className="card mb-6 flex items-center gap-4 p-4">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={setAvatar.isPending}
+        aria-label={path ? 'Change your profile picture' : 'Add a profile picture'}
+        className="relative shrink-0 rounded-full disabled:opacity-60"
+      >
+        <Avatar src={photoUrls?.get(path)} name={profile?.display_name} className="w-20 h-20 text-2xl" />
+        <span className="absolute -bottom-0.5 -right-0.5 flex w-7 h-7 items-center justify-center rounded-full bg-accent text-white">
+          <Camera className="w-4 h-4" />
+        </span>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        capture="user"
+        className="sr-only"
+        tabIndex={-1}
+        onChange={choose}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="inline-flex max-w-full items-center gap-1 font-semibold text-white">
+          <span className="truncate">{profile?.display_name || 'Your profile'}</span>
+          {verified && <VerifiedBadge />}
+        </p>
+        {profile?.username && <p className="text-[13px] text-text-muted truncate">@{profile.username}</p>}
+        <p className="mt-1 text-[13px] text-text-secondary">
+          {setAvatar.isPending ? 'Saving your photo…' : status}
+        </p>
+        {error && (
+          <p role="alert" className="mt-1 text-[13px] text-red">
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// Points: what this person holds, how to earn more, and where they went.
+function RewardsCard({ userId, verified }) {
+  const { data: points } = useMyPoints(userId);
+  const { data: settings } = usePlatformSettings();
+  const [showHistory, setShowHistory] = useState(false);
+  const { data: history = [], isLoading } = usePointHistory(userId, showHistory);
+
+  // Null until the points migration has run.
+  if (!points) return null;
+
+  const worth = ngweeToZmw(points.balance * points.pointValueNgwee);
+  const perEvent = settings?.pointsPerAttendance;
+  const perFriend = settings?.pointsPerReferral;
+
+  return (
+    <section aria-labelledby="points-heading" className="card mb-6 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 id="points-heading" className="flex items-center gap-1.5 text-[13px] font-medium text-text-muted">
+            <Sparkles className="w-3.5 h-3.5 text-accent" />
+            Your points
+          </h3>
+          <p className="text-3xl font-bold tracking-tight text-white tabular-nums">{points.balance.toLocaleString()}</p>
+          <p className="text-[13px] text-text-muted">
+            Worth K{worth.toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowHistory((v) => !v)}
+          aria-expanded={showHistory}
+          className="text-sm font-medium text-accent-hover hover:underline"
+        >
+          {showHistory ? 'Hide history' : 'History'}
+        </button>
+      </div>
+      {perEvent != null && (
+        <p className="mt-3 text-[13px] text-text-secondary">
+          Earn {perEvent} points every time you are checked in at an event, and {perFriend} when a friend
+          you invited goes to their first one.{' '}
+          {verified ? 'Spend them on paid passes at checkout.' : 'Get verified to spend them on paid passes.'}
+        </p>
+      )}
+      {showHistory && (
+        <ul className="mt-4 space-y-2" aria-busy={isLoading}>
+          {history.length === 0 && !isLoading && (
+            <li className="text-[13px] text-text-muted">Nothing yet. Your first event check-in earns points.</li>
+          )}
+          {history.map((entry) => (
+            <li key={entry.id} className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="min-w-0 truncate text-text-secondary">{describePointEntry(entry)}</span>
+              <span className={`shrink-0 font-semibold tabular-nums ${entry.points > 0 ? 'text-green' : 'text-text-muted'}`}>
+                {entry.points > 0 ? '+' : '−'}
+                {Math.abs(entry.points).toLocaleString()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigate }) {
   const { user, signOut } = useAuth();
   const { data: profile, isLoading } = useMyProfile(user?.id);
@@ -79,6 +233,7 @@ export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigat
     lookingFor: '',
     socialPlatform: '',
     socialHandle: '',
+    username: '',
   });
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -91,8 +246,22 @@ export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigat
       lookingFor: profile.looking_for ?? '',
       socialPlatform: profile.social_platform ?? '',
       socialHandle: profile.social_handle ?? '',
+      username: profile.username ?? '',
     });
   }, [profile]);
+
+  // A username is checked a moment after typing stops, and only once it is a
+  // valid shape that differs from the saved one.
+  const savedUsername = profile?.username ?? '';
+  const usernameChanged = form.username !== savedUsername;
+  const usernameIssue = usernameChanged ? usernameProblem(form.username) : null;
+  const [checkName, setCheckName] = useState('');
+  useEffect(() => {
+    const ready = usernameChanged && form.username && !usernameIssue;
+    const timer = setTimeout(() => setCheckName(ready ? form.username : ''), 400);
+    return () => clearTimeout(timer);
+  }, [form.username, usernameChanged, usernameIssue]);
+  const { data: usernameFree, isFetching: checkingName } = useUsernameAvailable(checkName);
 
   const set = (key) => (e) => {
     setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -124,11 +293,27 @@ export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigat
       return;
     }
 
+    if (usernameIssue) {
+      setError(usernameIssue);
+      return;
+    }
+
     try {
-      await updateProfile.mutateAsync({ ...form, socialHandle: handle });
+      await updateProfile.mutateAsync({
+        ...form,
+        socialHandle: handle,
+        // Sent only when changed: see useUpdateProfile.
+        username: usernameChanged ? form.username : undefined,
+      });
       setSaved(true);
     } catch (err) {
-      setError(err.message ?? 'Could not save your profile. Try again.');
+      if (err?.code === '23505' && /username/.test(err.message ?? '')) {
+        setError('Someone just took that username. Try another.');
+      } else if (err?.code === '42703') {
+        setError('Usernames are not switched on yet. Clear it to save the rest.');
+      } else {
+        setError(err.message ?? 'Could not save your profile. Try again.');
+      }
     }
   };
 
@@ -156,6 +341,8 @@ export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigat
       subtitle="This is what other people at an event see."
       footer={footer}
     >
+      <PhotoCard userId={user?.id} profile={profile} />
+      <RewardsCard userId={user?.id} verified={Boolean(profile?.identity_verified_at)} />
       <InviteCard userId={user?.id} />
       {isLoading ? (
         <div className="space-y-4" aria-hidden="true">
@@ -175,6 +362,42 @@ export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigat
               className="input-dark"
               placeholder="How your name appears"
             />
+          </div>
+
+          <div>
+            <label htmlFor="pf-username" className="field-label">Username</label>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-muted" aria-hidden="true">
+                @
+              </span>
+              <input
+                id="pf-username"
+                value={form.username}
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, username: cleanUsername(e.target.value) }));
+                  setSaved(false);
+                  setError('');
+                }}
+                maxLength={20}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-describedby="pf-username-hint"
+                className="input-dark pl-8"
+                placeholder="yourname"
+              />
+            </div>
+            <p id="pf-username-hint" className="mt-1.5 text-[13px] text-text-muted" aria-live="polite">
+              {usernameIssue ? (
+                <span className="text-red">{usernameIssue}</span>
+              ) : usernameChanged && form.username && checkName === form.username && !checkingName && usernameFree === false ? (
+                <span className="text-red">That username is taken.</span>
+              ) : usernameChanged && form.username && checkName === form.username && !checkingName && usernameFree ? (
+                <span className="text-green">Available.</span>
+              ) : (
+                'Unique to you, so people can tell you apart. Letters, numbers, _ and dots.'
+              )}
+            </p>
           </div>
 
           <div>

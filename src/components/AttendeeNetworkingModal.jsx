@@ -1,7 +1,8 @@
 import { ExternalLink, Eye, EyeOff, Star } from 'lucide-react';
 import Sheet from './Sheet';
+import { Avatar, PersonName } from './Avatar';
 import { useAuth } from '../lib/authContext';
-import { useAttendees, useFeatureAttendee, useSetAttendeeVisibility } from '../lib/queries';
+import { useAttendees, useFeatureAttendee, usePhotoUrls, useSetAttendeeVisibility } from '../lib/queries';
 
 const PLATFORM_LABEL = {
   instagram: 'Instagram',
@@ -17,6 +18,8 @@ export default function AttendeeNetworkingModal({ event, isOpen, onClose }) {
   // Row-level security decides what comes back: people at the same event see
   // each other, and everyone sees attendees the host has featured publicly.
   const { data: attendees = [], isLoading } = useAttendees(isOpen ? event?.id : null);
+  // Storage policies hand back only the pictures this viewer may see.
+  const { data: photoUrls } = usePhotoUrls(attendees.map((a) => a.avatarPath));
   const setVisibility = useSetAttendeeVisibility(user?.id);
   const featureAttendee = useFeatureAttendee();
 
@@ -84,19 +87,12 @@ export default function AttendeeNetworkingModal({ event, isOpen, onClose }) {
         <ul className="-mx-2 divide-y divide-white/5">
           {attendees.map((person) => (
             <li key={person.userId} className="flex items-center gap-3 px-2 py-3.5">
-              <span
-                className="brand-gradient w-11 h-11 rounded-full flex items-center justify-center text-base font-bold text-white shrink-0"
-                aria-hidden="true"
-              >
-                {person.name.charAt(0)}
-              </span>
+              <Avatar src={photoUrls?.get(person.avatarPath)} name={person.name} />
               <div className="min-w-0 flex-1">
-                <p className="font-semibold text-white truncate">
-                  {person.name}
-                  {person.featuredByHost && (
-                    <span className="ml-1.5 text-[11px] font-semibold uppercase tracking-wide text-accent">Featured</span>
-                  )}
-                </p>
+                <PersonName name={person.name} username={person.username} verified={person.verified} className="block" />
+                {person.featuredByHost && (
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-accent">Featured</p>
+                )}
                 {person.role && <p className="text-sm text-text-secondary truncate">{person.role}</p>}
                 {person.lookingToConnect && (
                   <p className="text-[13px] text-text-muted truncate">Looking for {person.lookingToConnect}</p>

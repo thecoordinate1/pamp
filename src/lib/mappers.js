@@ -137,6 +137,8 @@ export function rowToAttendee(row) {
     socialHandle: p.social_handle || null,
     socialUrl: socialUrl(p.social_platform, p.social_handle),
     avatarPath: p.avatar_path || null,
+    username: p.username || null,
+    verified: Boolean(p.identity_verified_at),
     showPublicly: row.show_publicly,
     featuredByHost: row.featured_by_host,
   };
@@ -166,5 +168,18 @@ export function rowToGuestRequest(row) {
     userName: p.display_name || 'Guest',
     userRole: p.headline || '',
     userSocial: socialUrl(p.social_platform, p.social_handle),
+    userAvatarPath: p.avatar_path || null,
+    username: p.username || null,
+    verified: Boolean(p.identity_verified_at),
+  };
+}
+
+export function rowToPointEntry(row) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    points: row.points,
+    createdAt: row.created_at,
+    eventName: row.events?.name ?? null,
   };
 }

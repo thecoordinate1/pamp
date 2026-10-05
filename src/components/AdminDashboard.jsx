@@ -1,6 +1,15 @@
-import { Activity, CalendarDays, Ticket, TrendingUp, Users, Wallet } from 'lucide-react';
+import { useState } from 'react';
+import { Activity, BadgeCheck, CalendarDays, Ticket, TrendingUp, Users, Wallet, X } from 'lucide-react';
+import { Avatar } from './Avatar';
 import { ngweeToZmw } from '../lib/mappers';
-import { usePlatformEvents, usePlatformSignups, usePlatformStats } from '../lib/queries';
+import {
+  usePhotoUrls,
+  usePlatformEvents,
+  usePlatformSignups,
+  usePlatformStats,
+  useProfilesToVerify,
+  useReviewProfilePhoto,
+} from '../lib/queries';
 
 const kwacha = (ngwee) =>
   `K${ngweeToZmw(ngwee).toLocaleString('en-ZM', { maximumFractionDigits: 2 })}`;
@@ -51,6 +60,89 @@ function SignupTrend({ rows }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Profile photos no admin has checked. A badge says the person matches their
+// photo, so the check is: is this a clear, real photo of one person's face,
+// and does it fit the name? Changing the photo later takes the badge off.
+function PhotoChecks() {
+  const { data: queue, isError } = useProfilesToVerify(true);
+  const review = useReviewProfilePhoto();
+  const { data: photoUrls } = usePhotoUrls((queue ?? []).map((p) => p.avatar_path));
+  const [notice, setNotice] = useState('');
+
+  // Null: the migration that adds the badge has not run yet.
+  if (queue == null || isError) return null;
+
+  const decide = async (person, matches) => {
+    setNotice('');
+    try {
+      const recorded = await review.mutateAsync({
+        userId: person.user_id,
+        avatarPath: person.avatar_path,
+        matches,
+      });
+      if (!recorded) setNotice(`${person.display_name || 'They'} changed their photo. The new one is in the list.`);
+    } catch (err) {
+      setNotice(err.message ?? 'Could not save that. Try again.');
+    }
+  };
+
+  return (
+    <section aria-labelledby="photo-checks-heading">
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 id="photo-checks-heading" className="font-semibold text-white">Photos to verify</h3>
+        <p className="text-[13px] text-text-muted">{queue.length} waiting</p>
+      </div>
+      {notice && (
+        <p role="status" className="mb-3 text-sm text-amber">
+          {notice}
+        </p>
+      )}
+      {queue.length === 0 ? (
+        <div className="card p-6 text-center text-text-secondary">Every photo has been checked.</div>
+      ) : (
+        <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {queue.map((person) => (
+            <li key={person.user_id} className="card flex items-center gap-4 p-4">
+              <Avatar
+                src={photoUrls?.get(person.avatar_path)}
+                name={person.display_name}
+                className="w-20 h-20 text-2xl"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-white truncate">{person.display_name || 'No name yet'}</p>
+                {person.username && <p className="text-[13px] text-text-muted truncate">@{person.username}</p>}
+                <p className="text-[13px] text-text-muted">
+                  Joined {new Date(person.joined_at).toLocaleDateString('en-ZM', { day: 'numeric', month: 'short' })}
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={review.isPending}
+                    onClick={() => decide(person, false)}
+                    className="btn-secondary h-9 min-h-9 px-3 text-sm"
+                  >
+                    <X className="w-4 h-4" />
+                    No match
+                  </button>
+                  <button
+                    type="button"
+                    disabled={review.isPending}
+                    onClick={() => decide(person, true)}
+                    className="btn-accent h-9 min-h-9 px-3 text-sm"
+                  >
+                    <BadgeCheck className="w-4 h-4" />
+                    Verify
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -129,6 +221,8 @@ export default function AdminDashboard() {
           payment. No mobile money provider is connected yet, so these cannot settle.
         </p>
       )}
+
+      <PhotoChecks />
 
       <SignupTrend rows={signups} />
 

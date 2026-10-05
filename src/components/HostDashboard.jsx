@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import CheckInSheet from './CheckInSheet';
 import LocationPicker from './LocationPicker';
+import { VerifiedBadge } from './Avatar';
 import { useAuth } from '../lib/authContext';
-import { useEventPrivate, useHostRevenue, useSelfieUrls } from '../lib/queries';
+import { useEventPrivate, useHostRevenue, usePhotoUrls } from '../lib/queries';
 import { ngweeToZmw } from '../lib/mappers';
 import { formatEventDate, zambiaDateString } from '../lib/format';
 import { uploadEventImage } from '../lib/storage';
@@ -114,8 +115,10 @@ export default function HostDashboard({
     ...r,
     eventTitle: events.find((e) => e.id === r.eventId)?.name || 'an event',
   }));
-  // The selfie sent with each request, which only this host may open.
-  const { data: selfieUrls } = useSelfieUrls(requests.map((r) => r.selfiePath));
+  // The selfie sent with each request, or failing that the requester's profile
+  // picture. Storage policies let this host open both.
+  const { data: photoUrls } = usePhotoUrls(requests.flatMap((r) => [r.selfiePath, r.userAvatarPath]));
+  const photoFor = (req) => photoUrls?.get(req.selfiePath) ?? photoUrls?.get(req.userAvatarPath);
   const today = zambiaDateString();
   const pendingFacecards = requests.filter(f => f.status === 'pending');
 
@@ -228,10 +231,10 @@ export default function HostDashboard({
               {requests.map((req) => (
                 <li key={req.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 sm:p-6">
                   <div className="min-w-0 flex gap-4">
-                    {selfieUrls?.get(req.selfiePath) ? (
+                    {photoFor(req) ? (
                       <img
-                        src={selfieUrls.get(req.selfiePath)}
-                        alt={`Selfie from ${req.userName}`}
+                        src={photoFor(req)}
+                        alt={`Photo of ${req.userName}`}
                         className="w-16 h-16 rounded-2xl object-cover shrink-0"
                       />
                     ) : (
@@ -245,6 +248,7 @@ export default function HostDashboard({
                     <div className="min-w-0">
                     <p className="font-semibold text-white">
                       {req.userName}
+                      {req.verified && <VerifiedBadge className="ml-1 w-4 h-4" />}
                       {req.userSocial && (
                         <a
                           href={req.userSocial}
@@ -257,6 +261,7 @@ export default function HostDashboard({
                         </a>
                       )}
                     </p>
+                    {req.username && <p className="text-[13px] text-text-muted">@{req.username}</p>}
                     {req.userRole && <p className="text-sm text-text-secondary">{req.userRole}</p>}
                     <p className="mt-2 text-[15px] leading-relaxed text-text-primary/90">&ldquo;{req.reason}&rdquo;</p>
                     <p className="mt-2 text-[13px] text-text-muted">For {req.eventTitle}</p>

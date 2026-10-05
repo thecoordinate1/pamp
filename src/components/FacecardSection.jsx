@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Camera, CheckCircle2, Clock, ExternalLink, MessageCircle, XCircle } from 'lucide-react';
 import LocationCard from './LocationCard';
+import { PersonName } from './Avatar';
 import { useAuth } from '../lib/authContext';
 import { formatEventDate } from '../lib/format';
-import { useEventPrivate, useMyProfile, useSelfieUrls, useSetDisplayName } from '../lib/queries';
-import { uploadSelfie } from '../lib/storage';
+import { useEventPrivate, useMyProfile, usePhotoUrls, useSetAvatar, useSetDisplayName } from '../lib/queries';
 
 const STATUS = {
   pending: { label: 'Waiting for the host', Icon: Clock, className: 'bg-amber/15 text-amber' },
@@ -52,6 +52,7 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
   const { user } = useAuth();
   const { data: profile } = useMyProfile(user?.id);
   const setDisplayName = useSetDisplayName(user?.id);
+  const setAvatar = useSetAvatar(user?.id);
   const [activeTab, setActiveTab] = useState('request');
   const [selectedParty, setSelectedParty] = useState('');
   const [selfiePreview, setSelfiePreview] = useState(null);
@@ -69,7 +70,14 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
   // One request per event: the database refuses a second, so do not offer it.
   const requestedIds = new Set(myRequests.map((r) => r.eventId));
   const openParties = parties.filter((p) => !requestedIds.has(p.id));
-  const { data: selfieUrls } = useSelfieUrls(hostRequests.map((r) => r.selfiePath));
+  // The requester's selfie or profile picture for the host view, and this
+  // person's own picture for the form.
+  const { data: photoUrls } = usePhotoUrls([
+    profile?.avatar_path,
+    ...hostRequests.flatMap((r) => [r.selfiePath, r.userAvatarPath]),
+  ]);
+  const currentPhoto = photoUrls?.get(profile?.avatar_path) ?? null;
+  const shownPhoto = selfiePreview ?? currentPhoto;
 
   const handleSelfieChange = (e) => {
     const file = e.target.files[0];
@@ -98,9 +106,10 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
       // Hosts see the profile name, so the name typed here becomes it.
       if (name.trim() !== profileName) await setDisplayName.mutateAsync(name.trim());
 
-      // The selfie goes to the private `selfies` bucket under the user's own
-      // folder; only the path is stored on the request.
-      const selfiePath = selfieFile ? await uploadSelfie(selfieFile, user.id) : null;
+      // A new selfie becomes the profile picture, and goes with the request.
+      // Without one, the current profile picture goes instead. Both live in the
+      // private selfies bucket; only the path is stored.
+      const selfiePath = selfieFile ? await setAvatar.mutateAsync(selfieFile) : profile?.avatar_path ?? null;
 
       await onNewRequest({
         eventId: selectedParty,
@@ -150,13 +159,13 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
               <label className="relative cursor-pointer group" aria-label="Add a selfie">
                 <span
                   className={`flex w-28 h-28 items-center justify-center overflow-hidden rounded-full transition-colors duration-200 ${
-                    selfiePreview
+                    shownPhoto
                       ? 'shadow-[0_0_0_3px_#E040FB]'
                       : 'bg-white/5 border border-dashed border-white/20 group-hover:border-accent/60'
                   }`}
                 >
-                  {selfiePreview ? (
-                    <img src={selfiePreview} alt="Your selfie" className="w-full h-full object-cover" />
+                  {shownPhoto ? (
+                    <img src={shownPhoto} alt="Your profile picture" className="w-full h-full object-cover" />
                   ) : (
                     <Camera className="w-7 h-7 text-text-secondary" />
                   )}
@@ -164,19 +173,27 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
                 <input type="file" accept="image/jpeg,image/png,image/webp" capture="user" className="sr-only" onChange={handleSelfieChange} />
               </label>
               {selfiePreview ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelfiePreview(null);
-                    setSelfieFile(null);
-                  }}
-                  className="mt-3 text-sm font-medium text-text-secondary hover:text-white"
-                >
-                  Remove photo
-                </button>
+                <>
+                  <p className="mt-3 text-sm text-text-secondary">This becomes your profile picture when you send.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelfiePreview(null);
+                      setSelfieFile(null);
+                    }}
+                    className="mt-1 text-sm font-medium text-text-secondary hover:text-white"
+                  >
+                    {currentPhoto ? 'Keep my current picture' : 'Remove photo'}
+                  </button>
+                </>
+              ) : currentPhoto ? (
+                <p className="mt-3 text-sm text-text-secondary">
+                  Your profile picture goes with the request. Tap it to take a new one.
+                </p>
               ) : (
                 <p className="mt-3 text-sm text-text-secondary">
-                  Add a selfie. Only the host of the event you pick can see it.
+                  Add a selfie. It becomes your profile picture: hosts see it, and other guests
+                  only at events where you choose to be listed.
                 </p>
               )}
             </div>
@@ -306,12 +323,12 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
                 <div key={req.id} className={`card p-5 flex flex-col ${req.status === 'declined' ? 'opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <img
-                      src={selfieUrls?.get(req.selfiePath) ?? initialAvatar(req.userName)}
-                      alt={req.selfiePath ? `Selfie from ${req.userName}` : ''}
+                      src={photoUrls?.get(req.selfiePath) ?? photoUrls?.get(req.userAvatarPath) ?? initialAvatar(req.userName)}
+                      alt={req.selfiePath || req.userAvatarPath ? `Photo of ${req.userName}` : ''}
                       className="w-14 h-14 rounded-full object-cover shrink-0"
                     />
                     <div className="min-w-0">
-                      <p className="font-semibold text-white truncate">{req.userName}</p>
+                      <PersonName name={req.userName} username={req.username} verified={req.verified} className="block" />
                       <p className="text-[13px] text-text-muted truncate">{hostEventName(req.eventId)}</p>
                       {req.userSocial && (
                         <a

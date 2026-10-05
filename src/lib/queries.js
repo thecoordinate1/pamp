@@ -7,10 +7,12 @@ import {
   rowToGuestRequest,
   rowToMyRequest,
   rowToPass,
+  rowToPointEntry,
   rowToPrivateDetails,
   rowToSharedPass,
 } from './mappers';
 import { readStoredPasses, storePasses } from './passes';
+import { uploadSelfie } from './storage';
 import { zambiaDateString } from './format';
 
 const unwrap = ({ data, error }) => {
@@ -18,47 +20,54 @@ const unwrap = ({ data, error }) => {
   return data;
 };
 
+// Columns a migration adds may not exist yet, because the app can ship before
+// the migration runs. PostgREST then rejects the whole select (42703, undefined
+// column), so fall back to the columns that exist rather than take the screen
+// down. Postgres checks the list before writing anything, so retrying an insert
+// or update this way never applies it twice.
+function withFallback(current, legacy) {
+  let columns = current;
+  return async (run) => {
+    const result = await run(columns);
+    if (result.error?.code === '42703' && columns !== legacy) {
+      columns = legacy;
+      return run(columns);
+    }
+    return result;
+  };
+}
+
 const LEGACY_EVENT_COLUMNS =
   'id, host_id, name, category, status, starts_on, start_time, city, area, vibe,' +
   ' dress_code, description, image_url, host_display_name, organization,' +
   ' ticket_price_ngwee, currency, capacity, rsvp_count, vibe_score,' +
   ' area_latitude, area_longitude';
+// attended_count arrives with migration 20261004000100.
 const EVENT_COLUMNS = `${LEGACY_EVENT_COLUMNS}, attended_count`;
-
-// attended_count arrives with migration 20261004000100. If the app is deployed
-// before that migration has run, PostgREST rejects the whole select (42703,
-// undefined column), so fall back to the columns that exist rather than take
-// the event list down. Postgres checks the list before writing anything, so
-// retrying an insert or update this way never applies it twice.
-let eventColumns = EVENT_COLUMNS;
-async function withEventColumns(run) {
-  const result = await run(eventColumns);
-  if (result.error?.code === '42703' && eventColumns !== LEGACY_EVENT_COLUMNS) {
-    eventColumns = LEGACY_EVENT_COLUMNS;
-    return run(eventColumns);
-  }
-  return result;
-}
+const withEventColumns = withFallback(EVENT_COLUMNS, LEGACY_EVENT_COLUMNS);
 
 // Enough of an event to open its passes with no signal.
 const PASS_EVENT_COLUMNS =
   'id, name, category, starts_on, start_time, city, area, image_url, host_display_name,' +
   ' ticket_price_ngwee, currency';
 const LEGACY_PASS_COLUMNS = `id, code, status, checked_in_at, event_id, order_id, created_at, events:event_id (${PASS_EVENT_COLUMNS})`;
-// shared_at arrives with migration 20261004000300: same fallback as events.
+// shared_at arrives with migration 20261004000300.
 const PASS_COLUMNS = `${LEGACY_PASS_COLUMNS}, shared_at`;
-let passColumns = PASS_COLUMNS;
-async function withPassColumns(run) {
-  const result = await run(passColumns);
-  if (result.error?.code === '42703' && passColumns !== LEGACY_PASS_COLUMNS) {
-    passColumns = LEGACY_PASS_COLUMNS;
-    return run(passColumns);
-  }
-  return result;
-}
+const withPassColumns = withFallback(PASS_COLUMNS, LEGACY_PASS_COLUMNS);
 
-const PROFILE_EMBED =
-  'profiles:user_id (display_name, headline, looking_for, social_platform, social_handle, avatar_path)';
+const LEGACY_PROFILE_FIELDS = 'display_name, headline, looking_for, social_platform, social_handle, avatar_path';
+// username and the verified badge arrive with migration 20261005000200.
+const PROFILE_FIELDS = `${LEGACY_PROFILE_FIELDS}, username, identity_verified_at`;
+const withProfileFields = withFallback(PROFILE_FIELDS, LEGACY_PROFILE_FIELDS);
+const profileEmbed = (fields) => `profiles:user_id (${fields})`;
+
+const LEGACY_SETTINGS = 'fee_percent_bps, fee_fixed_ngwee';
+const SETTINGS = `${LEGACY_SETTINGS}, points_per_attendance, points_per_referral, point_value_ngwee`;
+const withSettingsColumns = withFallback(SETTINGS, LEGACY_SETTINGS);
+
+// PostgREST's answers for a function or table a migration has not created yet.
+const MISSING_FUNCTION = 'PGRST202';
+const isMissingTable = (error) => error?.code === 'PGRST205' || error?.code === '42P01';
 
 export const keys = {
   events: ['events'],
@@ -73,6 +82,7 @@ export const keys = {
   passes: ['passes'],
   myPasses: (userId) => ['passes', userId],
   myReferral: (userId) => ['referral', userId],
+  myPoints: (userId) => ['me', userId, 'points'],
 };
 
 export function useEvents() {
@@ -137,10 +147,12 @@ export function useAttendees(eventId) {
     enabled: Boolean(eventId),
     queryFn: async () =>
       unwrap(
-        await supabase
-          .from('event_rsvps')
-          .select(`user_id, show_publicly, featured_by_host, ${PROFILE_EMBED}`)
-          .eq('event_id', eventId)
+        await withProfileFields((fields) =>
+          supabase
+            .from('event_rsvps')
+            .select(`user_id, show_publicly, featured_by_host, ${profileEmbed(fields)}`)
+            .eq('event_id', eventId)
+        )
       ).map(rowToAttendee),
   });
 }
@@ -278,11 +290,13 @@ export function useGuestRequests(eventIds) {
     enabled: Array.isArray(eventIds) && eventIds.length > 0,
     queryFn: async () =>
       unwrap(
-        await supabase
-          .from('guest_requests')
-          .select(`id, event_id, user_id, status, reason, selfie_path, created_at, ${PROFILE_EMBED}`)
-          .in('event_id', eventIds)
-          .order('created_at', { ascending: false })
+        await withProfileFields((fields) =>
+          supabase
+            .from('guest_requests')
+            .select(`id, event_id, user_id, status, reason, selfie_path, created_at, ${profileEmbed(fields)}`)
+            .in('event_id', eventIds)
+            .order('created_at', { ascending: false })
+        )
       ).map(rowToGuestRequest),
   });
 }
@@ -303,12 +317,13 @@ export function useMyGuestRequests(userId) {
   });
 }
 
-// Signed links for selfies in the private bucket. Storage policies decide which
-// ones come back: a host gets the selfies sent with requests to their events.
-export function useSelfieUrls(paths) {
+// Signed links for photos in the private selfies bucket: profile pictures and
+// the selfies sent with requests. Storage policies decide which come back, so
+// a photo this person may not see is simply missing from the map.
+export function usePhotoUrls(paths) {
   const list = [...new Set(paths.filter(Boolean))].sort();
   return useQuery({
-    queryKey: ['selfie-urls', list],
+    queryKey: ['photo-urls', list],
     enabled: list.length > 0,
     // Links last an hour; refresh well before they expire.
     staleTime: 30 * 60 * 1000,
@@ -340,6 +355,42 @@ export function useSetDisplayName(userId) {
     mutationFn: async (displayName) =>
       unwrap(await supabase.from('profiles').update({ display_name: displayName }).eq('id', userId)),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.myProfile(userId) }),
+  });
+}
+
+// Makes a new photo this person's profile picture. Changing it takes off the
+// verified badge until an admin checks the new one.
+export function useSetAvatar(userId) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (file) => {
+      const path = await uploadSelfie(file, userId);
+      unwrap(await supabase.from('profiles').update({ avatar_path: path }).eq('id', userId));
+      return path;
+    },
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['me', userId] }),
+        // Lists that show this person's picture.
+        qc.invalidateQueries({ queryKey: ['events'] }),
+        qc.invalidateQueries({ queryKey: ['requests'] }),
+      ]),
+  });
+}
+
+// Null while the check is not available yet, so the form does not claim
+// either way.
+export function useUsernameAvailable(name) {
+  return useQuery({
+    queryKey: ['username-available', name],
+    enabled: Boolean(name),
+    staleTime: 30 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('username_available', { p_username: name });
+      if (error?.code === MISSING_FUNCTION) return null;
+      if (error) throw error;
+      return Boolean(data);
+    },
   });
 }
 
@@ -379,13 +430,87 @@ export function useMyProfile(userId) {
     enabled: Boolean(userId),
     queryFn: async () => {
       const rows = unwrap(
-        await supabase
-          .from('profiles')
-          .select('id, display_name, headline, looking_for, social_platform, social_handle, avatar_path, host_status')
-          .eq('id', userId)
-          .limit(1)
+        await withProfileFields((fields) =>
+          supabase.from('profiles').select(`id, host_status, ${fields}`).eq('id', userId).limit(1)
+        )
       );
       return rows[0] ?? null;
+    },
+  });
+}
+
+// The photo an admin last looked at. When it is the current one and there is
+// no badge, the check found no match.
+export function useMyPhotoReview(userId) {
+  return useQuery({
+    queryKey: ['me', userId, 'photo-review'],
+    enabled: Boolean(userId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('account_private')
+        .select('avatar_reviewed_path')
+        .eq('user_id', userId)
+        .limit(1);
+      if (error?.code === '42703') return null;
+      if (error) throw error;
+      return data[0]?.avatar_reviewed_path ?? null;
+    },
+  });
+}
+
+// Fees and points rules. Everyone may read them.
+export function usePlatformSettings(enabled = true) {
+  return useQuery({
+    queryKey: ['platform-settings'],
+    enabled,
+    staleTime: 10 * 60 * 1000,
+    queryFn: async () => {
+      const rows = unwrap(
+        await withSettingsColumns((columns) =>
+          supabase.from('platform_settings').select(columns).eq('id', 1).limit(1)
+        )
+      );
+      const r = rows[0] ?? {};
+      return {
+        feePercentBps: r.fee_percent_bps ?? 0,
+        feeFixedNgwee: r.fee_fixed_ngwee ?? 0,
+        pointsPerAttendance: r.points_per_attendance ?? null,
+        pointsPerReferral: r.points_per_referral ?? null,
+        pointValueNgwee: r.point_value_ngwee ?? null,
+      };
+    },
+  });
+}
+
+// This person's points balance. Null until the points migration has run.
+export function useMyPoints(userId) {
+  return useQuery({
+    queryKey: keys.myPoints(userId),
+    enabled: Boolean(userId),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('my_points');
+      if (error?.code === MISSING_FUNCTION) return null;
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      return row ? { balance: row.balance ?? 0, pointValueNgwee: row.point_value_ngwee ?? 10 } : null;
+    },
+  });
+}
+
+export function usePointHistory(userId, enabled = true) {
+  return useQuery({
+    queryKey: ['me', userId, 'points', 'history'],
+    enabled: Boolean(userId) && enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('point_entries')
+        .select('id, kind, points, created_at, events:event_id (name)')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (isMissingTable(error)) return [];
+      if (error) throw error;
+      return data.map(rowToPointEntry);
     },
   });
 }
@@ -396,13 +521,17 @@ export function useMyProfile(userId) {
 export function useCreateOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ eventId, quantity, method, msisdn }) => {
-      const { data, error } = await supabase.rpc('create_order', {
+    mutationFn: async ({ eventId, quantity, method, msisdn, points = 0 }) => {
+      const args = {
         p_event_id: eventId,
         p_quantity: quantity,
         p_method: method ?? 'free',
         p_msisdn: msisdn ?? null,
-      });
+      };
+      // Sent only when used, so ordering still works before the points
+      // migration adds the parameter.
+      if (points > 0) args.p_points = points;
+      const { data, error } = await supabase.rpc('create_order', args);
       if (error) throw error;
       return Array.isArray(data) ? data[0] : data;
     },
@@ -542,24 +671,26 @@ export function useMyReferral(userId) {
   });
 }
 
-// The protect_profile_columns trigger blocks id, host_status and created_at for
-// ordinary callers, so only the fields a person owns are sent here.
+// The protect_profile_columns trigger blocks id, host_status, created_at and
+// the verified badge for ordinary callers, so only the fields a person owns are
+// sent here. The username is sent only when it changed, so saving still works
+// before the migration that adds it.
 export function useUpdateProfile(userId) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (fields) => {
+      const changes = {
+        display_name: fields.displayName ?? '',
+        headline: fields.headline ?? '',
+        looking_for: fields.lookingFor ?? '',
+        social_platform: fields.socialPlatform || null,
+        social_handle: fields.socialHandle ? fields.socialHandle.replace(/^@/, '') : null,
+      };
+      if (fields.username !== undefined) changes.username = fields.username || null;
       const rows = unwrap(
-        await supabase
-          .from('profiles')
-          .update({
-            display_name: fields.displayName ?? '',
-            headline: fields.headline ?? '',
-            looking_for: fields.lookingFor ?? '',
-            social_platform: fields.socialPlatform || null,
-            social_handle: fields.socialHandle ? fields.socialHandle.replace(/^@/, '') : null,
-          })
-          .eq('id', userId)
-          .select('id, display_name, headline, looking_for, social_platform, social_handle, avatar_path, host_status')
+        await withProfileFields((columns) =>
+          supabase.from('profiles').update(changes).eq('id', userId).select(`id, host_status, ${columns}`)
+        )
       );
       return rows[0] ?? null;
     },
@@ -622,11 +753,13 @@ export function useEventTickets(eventIds) {
     enabled: Array.isArray(eventIds) && eventIds.length > 0,
     queryFn: async () =>
       unwrap(
-        await supabase
-          .from('tickets')
-          .select(`id, code, status, checked_in_at, event_id, user_id, ${PROFILE_EMBED}`)
-          .in('event_id', eventIds)
-          .order('created_at', { ascending: false })
+        await withProfileFields((fields) =>
+          supabase
+            .from('tickets')
+            .select(`id, code, status, checked_in_at, event_id, user_id, ${profileEmbed(fields)}`)
+            .in('event_id', eventIds)
+            .order('created_at', { ascending: false })
+        )
       ),
   });
 }
@@ -681,5 +814,37 @@ export function usePlatformSignups(enabled, days = 30) {
       if (error) throw error;
       return data ?? [];
     },
+  });
+}
+
+// Profiles with a photo no admin has checked yet. Null until the migration runs.
+export function useProfilesToVerify(enabled) {
+  return useQuery({
+    queryKey: ['admin', 'profiles-to-verify'],
+    enabled: Boolean(enabled),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('profiles_to_verify');
+      if (error?.code === MISSING_FUNCTION) return null;
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+// True when recorded; false when the person changed their photo since the
+// admin looked, so the queue reloads with the new one.
+export function useReviewProfilePhoto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, avatarPath, matches }) => {
+      const { data, error } = await supabase.rpc('review_profile_photo', {
+        p_user: userId,
+        p_avatar_path: avatarPath,
+        p_matches: matches,
+      });
+      if (error) throw error;
+      return Boolean(data);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'profiles-to-verify'] }),
   });
 }
