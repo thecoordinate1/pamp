@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { EyeOff, MapPinned, Search } from 'lucide-react';
 import Navbar from './components/Navbar';
 import TabBar from './components/TabBar';
 import PartyCard from './components/PartyCard';
-import EventMap from './components/EventMap';
 import EventFilter from './components/EventFilter';
-import HostDashboard from './components/HostDashboard';
 import MeetPage from './components/MeetPage';
 import FacecardSection from './components/FacecardSection';
 import TicketModal from './components/TicketModal';
@@ -13,7 +11,6 @@ import AttendeeNetworkingModal from './components/AttendeeNetworkingModal';
 import InstallPrompt from './components/InstallPrompt';
 import SignInSheet from './components/SignInSheet';
 import ProfileSheet from './components/ProfileSheet';
-import AdminDashboard from './components/AdminDashboard';
 import ShareSheet from './components/ShareSheet';
 import EventInviteSheet from './components/EventInviteSheet';
 import MyPassesSheet from './components/MyPassesSheet';
@@ -39,6 +36,21 @@ import {
   useToggleRsvp,
   useUpdateEvent,
 } from './lib/queries';
+
+// Loaded when first opened: the map pulls in Leaflet, the host screen the QR
+// scanner, and the admin screen is only ever seen by admins. Keeping them out of
+// the first download matters on mobile data.
+const EventMap = lazy(() => import('./components/EventMap'));
+const HostDashboard = lazy(() => import('./components/HostDashboard'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
+
+function PageLoading({ label }) {
+  return (
+    <div role="status" aria-live="polite" className="py-24 text-center text-text-secondary">
+      {label}
+    </div>
+  );
+}
 
 function PageHeader({ eyebrow, title, description, action }) {
   return (
@@ -430,13 +442,15 @@ export default function App() {
                 </div>
               }
             />
-            <EventMap
-              events={filteredEvents}
-              onSelectEvent={setNetworkingModalEvent}
-              onGetTickets={handleGetTickets}
-              passesByEvent={passesByEvent}
-              revealed={revealing ? revealed : undefined}
-            />
+            <Suspense fallback={<PageLoading label="Loading map…" />}>
+              <EventMap
+                events={filteredEvents}
+                onSelectEvent={setNetworkingModalEvent}
+                onGetTickets={handleGetTickets}
+                passesByEvent={passesByEvent}
+                revealed={revealing ? revealed : undefined}
+              />
+            </Suspense>
 
             {revealing && (
               <section aria-labelledby="pass-locations" className="mt-8">
@@ -486,14 +500,16 @@ export default function App() {
         {activePage === 'host' && (
           <section className="animate-fade-in pt-8 sm:pt-14">
             {user ? (
-              <HostDashboard
-                events={myEvents}
-                facecards={guestRequests}
-                onApproveFacecard={(id) => decideGuestRequest.mutate({ id, status: 'approved' })}
-                onDeclineFacecard={(id) => decideGuestRequest.mutate({ id, status: 'declined' })}
-                onCreateEvent={handleCreateEvent}
-                onUpdateEvent={handleUpdateEvent}
-              />
+              <Suspense fallback={<PageLoading label="Loading your events…" />}>
+                <HostDashboard
+                  events={myEvents}
+                  facecards={guestRequests}
+                  onApproveFacecard={(id) => decideGuestRequest.mutate({ id, status: 'approved' })}
+                  onDeclineFacecard={(id) => decideGuestRequest.mutate({ id, status: 'declined' })}
+                  onCreateEvent={handleCreateEvent}
+                  onUpdateEvent={handleUpdateEvent}
+                />
+              </Suspense>
             ) : (
               <StateCard
                 title="Sign in to host"
@@ -543,7 +559,9 @@ export default function App() {
               description="Everything happening across PAMP."
             />
             {isAdmin ? (
-              <AdminDashboard />
+              <Suspense fallback={<PageLoading label="Loading…" />}>
+                <AdminDashboard />
+              </Suspense>
             ) : (
               <StateCard
                 title="Not available"

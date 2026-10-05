@@ -1,6 +1,4 @@
-import { useState } from 'react';
-import CheckInSheet from './CheckInSheet';
-import LocationPicker from './LocationPicker';
+import { lazy, Suspense, useState } from 'react';
 import { VerifiedBadge } from './Avatar';
 import { useAuth } from '../lib/authContext';
 import { useEventPrivate, useHostRevenue, usePhotoUrls } from '../lib/queries';
@@ -33,6 +31,10 @@ const BLANK_EVENT = {
   // Branded artwork for events the host publishes without a photo.
   image: '/event-placeholder.jpg'
 };
+
+// The scanner and the map picker are only needed once a host opens them.
+const CheckInSheet = lazy(() => import('./CheckInSheet'));
+const LocationPicker = lazy(() => import('./LocationPicker'));
 
 export default function HostDashboard({
   events,
@@ -205,7 +207,11 @@ export default function HostDashboard({
         ))}
       </dl>
 
-      <CheckInSheet open={checkInOpen} onClose={() => setCheckInOpen(false)} />
+      {checkInOpen && (
+        <Suspense fallback={null}>
+          <CheckInSheet open onClose={() => setCheckInOpen(false)} />
+        </Suspense>
+      )}
 
       <div role="tablist" aria-label="Host sections" className="segmented max-w-md mb-8">
         {TABS.map(({ id, label }) => (
@@ -461,11 +467,13 @@ export default function HostDashboard({
               autoComplete="street-address"
               className="input-dark mb-3"
             />
-            <LocationPicker
-              idPrefix="new-event-location"
-              value={newEvent.coordinates}
-              onChange={(coordinates) => setNewEvent((form) => ({ ...form, coordinates }))}
-            />
+            <Suspense fallback={<p role="status" className="text-sm text-text-secondary">Loading map…</p>}>
+              <LocationPicker
+                idPrefix="new-event-location"
+                value={newEvent.coordinates}
+                onChange={(coordinates) => setNewEvent((form) => ({ ...form, coordinates }))}
+              />
+            </Suspense>
             <label htmlFor="new-event-whatsapp" className="field-label mt-4">WhatsApp for guests</label>
             <input
               id="new-event-whatsapp"

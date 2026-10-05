@@ -133,6 +133,12 @@ export async function asAnon(db, fn, { commit = false } = {}) {
   return asRole(db, 'anon', null, fn, { commit });
 }
 
+// Runs fn as service_role, which is what an Edge Function holding the service key
+// connects as: it bypasses RLS and may call the functions browsers cannot.
+export async function asService(db, fn, { commit = false } = {}) {
+  return asRole(db, 'service_role', null, fn, { commit });
+}
+
 async function asRole(db, role, userId, fn, { commit }) {
   let result;
   let failure;
