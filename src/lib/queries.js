@@ -537,15 +537,66 @@ export function useCreateOrder() {
     },
     // Returned so mutateAsync resolves only once the new pass has been fetched,
     // which lets the sheet go straight to showing it.
-    onSuccess: (order) =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: keys.passes }),
-        // Prefix invalidation: catches ['me', <userId>, 'rsvps'] for whoever
-        // is signed in, without needing to know the userId here.
-        qc.invalidateQueries({ queryKey: ['me'] }),
-        qc.invalidateQueries({ queryKey: keys.events }),
-        order?.event_id ? qc.invalidateQueries({ queryKey: keys.attendees(order.event_id) }) : null,
-      ]),
+    onSuccess: (order) => invalidateAfterOrder(qc, order?.event_id),
+  });
+}
+
+// What an order that has just been paid changes: the passes, the going count and
+// the guest list.
+function invalidateAfterOrder(qc, eventId) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: keys.passes }),
+    // Prefix invalidation: catches ['me', <userId>, 'rsvps'] for whoever
+    // is signed in, without needing to know the userId here.
+    qc.invalidateQueries({ queryKey: ['me'] }),
+    qc.invalidateQueries({ queryKey: keys.events }),
+    eventId ? qc.invalidateQueries({ queryKey: keys.attendees(eventId) }) : null,
+  ]);
+}
+
+// The lenco-charge Edge Function reads the order's price, phone number and
+// operator from the database, so only the order's id is sent. It answers
+// { state: 'paid' | 'failed' | 'pending' | 'review', message? }.
+async function callCharge(body) {
+  const { data, error } = await supabase.functions.invoke('lenco-charge', { body });
+  if (error) {
+    // The function's own explanation, such as a number Lenco rejected, is in the
+    // body of its error response.
+    let message;
+    try {
+      message = (await error.context.json()).message;
+    } catch {
+      /* no body */
+    }
+    throw new Error(message || 'Could not reach the payment service. Try again.');
+  }
+  return data;
+}
+
+// Asks Lenco to send a payment request to the customer's phone.
+export function useChargeOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId }) => callCharge({ order_id: orderId }),
+    onSuccess: (result, { eventId }) => (result.state === 'paid' ? invalidateAfterOrder(qc, eventId) : undefined),
+  });
+}
+
+// Polls while the customer approves on their phone. The webhook normally gets
+// there first; this covers a webhook that is late or not set up.
+export function useOrderPayment(orderId, { enabled, eventId }) {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: ['order-payment', orderId],
+    enabled: Boolean(orderId) && enabled,
+    queryFn: async () => {
+      const result = await callCharge({ order_id: orderId, check: true });
+      if (result.state === 'paid') await invalidateAfterOrder(qc, eventId);
+      return result;
+    },
+    refetchInterval: (query) => (query.state.data?.state === 'pending' || !query.state.data ? 6000 : false),
+    retry: 1,
+    gcTime: 0,
   });
 }
 

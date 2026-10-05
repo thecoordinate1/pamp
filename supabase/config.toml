@@ -414,8 +414,13 @@ enabled = true
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
 
-# The payment provider calls this with its own signature, not a Supabase JWT, so
-# the gateway must let it through; the function verifies the signature itself.
-[functions.payment-webhook]
+# Lenco calls this with its own signature, not a Supabase JWT, so the gateway must
+# let it through; the function verifies the signature itself.
+[functions.lenco-webhook]
 enabled = true
 verify_jwt = false
+
+# Called by the signed-in app, so the gateway checks the user's JWT.
+[functions.lenco-charge]
+enabled = true
+verify_jwt = true

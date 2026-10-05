@@ -60,27 +60,41 @@ Add a test for any migration that changes who can see or do something.
 
 ## Payments
 
-Paid events stay `pending` until a payment provider confirms them. The confirmation arrives at the `payment-webhook` Edge Function (`supabase/functions/payment-webhook/`), which checks the request's signature and that the amount equals the order total, then calls `mark_order_paid` with the service role. That issues the passes. A failure event marks the order `failed`, which returns any points spent on it. Redelivered webhooks are safe.
+Paid passes are collected through [Lenco](https://lenco-api.readme.io) mobile money (MTN, Airtel and Zamtel). Card is not offered yet.
+
+1. The customer picks a provider and number. `create_order` makes a `pending` order, setting the price and fee itself.
+2. The app calls the `lenco-charge` Edge Function with just the order id. It reads the amount, number and operator from the order and asks Lenco to prompt the customer's phone, using the order id as Lenco's `reference`.
+3. The customer approves on their phone. The app polls `lenco-charge` every few seconds, and Lenco also calls the `lenco-webhook` Edge Function.
+4. Both paths end the same way: ask Lenco for the collection's current state, check it is `successful`, in `ZMW`, for exactly the order total, then call `mark_order_paid` with the service role. That issues the passes. A failed collection marks the order `failed`, which returns any points spent on it. Doing it twice is harmless.
+
+The webhook is only a nudge. Its body is never trusted for status or amount; the decision always comes from Lenco's API over an authenticated call.
+
+Code: `supabase/functions/_shared/lenco.ts` (signatures, amounts, Lenco client, deciding what a collection means), `lenco-charge/` and `lenco-webhook/`. Tests sit beside them and run in `npm test`.
 
 ### Set up
 
-1. Choose a secret and give it to both sides:
+1. In the Lenco dashboard, get an API token. Use a sandbox token first. Lenco lists [test accounts](https://lenco-api.readme.io/v2.0/reference/test-cards-and-accounts) for sandbox collections.
+2. Give it to Supabase and deploy:
    ```sh
-   supabase secrets set PAYMENT_WEBHOOK_SECRET=<long random string>
-   supabase functions deploy payment-webhook
+   supabase secrets set LENCO_API_TOKEN=<token>
+   supabase functions deploy lenco-charge lenco-webhook
    ```
-2. Point the provider's webhook at `https://<project-ref>.supabase.co/functions/v1/payment-webhook`.
-3. The function expects a `POST` with the header `x-signature`, the hex HMAC-SHA256 of the raw body keyed with the secret, and this JSON:
-   ```json
-   { "event": "payment.succeeded", "order_id": "<uuid>", "reference": "<provider id>", "amount_ngwee": 5500 }
-   ```
-   (`payment.failed` for failures.) A real provider will send its own shape and signing scheme: adapt `verifySignature` and `parsePayment` in `logic.ts`. They are the only two places that know the format, and `logic.test.ts` covers them.
+3. Lenco sets webhook URLs for you: email support@lenco.ng and ask for `https://<project-ref>.supabase.co/functions/v1/lenco-webhook`. The webhook signature (`X-Lenco-Signature`) is checked with a key derived from the same token, so nothing else needs configuring.
+4. Switching from sandbox to live means setting the live token again with `supabase secrets set`.
 
-The browser side asks the provider to charge the customer's phone using the order's `id` and `total_ngwee`. That request is not built yet.
+Until the webhook is set up, payments still complete: the app's polling finds the result. The webhook makes it quicker, and covers a customer who closes the app before approving.
 
-### Known gap
+### Check before going live
 
-If a customer pays after their order's hold has run out and the order has expired, the webhook answers `409` and logs the order and reference. No passes are issued, so that payment has to be refunded or fixed by hand.
+- **The status endpoint path.** `getByReference` in `lenco.ts` uses `GET /collections/status/<reference>`, written from memory because Lenco's "get collection by reference" page was not available. Confirm it against that page and in the sandbox. If it is wrong, every payment stays pending.
+- **Collection webhook events.** Lenco's published event list has no collection event, only `transaction.*`. The webhook reads an order id from `data.reference` or `data.clientReference` and ignores events that carry none, so it works with either shape, but check what a sandbox collection actually sends.
+- **Fees.** Collections default to the merchant bearing Lenco's fee, so it comes out of PAMP's takings on top of PAMP's own service fee. Lenco's `bearer` option can pass it to the customer instead.
+
+### Known gaps
+
+- If a customer approves after their order's hold has run out, the order has expired and no pass is issued. The app shows "we need to check this payment" and the function logs the order and Lenco reference, so it has to be refunded or fixed by hand.
+- Mobile money accounts that Lenco makes verify by one-time PIN are not handled. Lenco's response schema lists only `pending`, `successful`, `failed` and `pay-offline`.
+- Card payments.
 
 ### Expiring unpaid orders
 
@@ -92,7 +106,7 @@ If a customer pays after their order's hold has run out and the order has expire
 
 ## Versioning
 
-Every push is a new version and every commit in it starts with that version, such as `v0.16.0 Add payment webhook`. See `CLAUDE.md` for how to choose the bump.
+Every push is a new version and every commit in it starts with that version, such as `v0.17.0 Collect payments through Lenco`. See `CLAUDE.md` for how to choose the bump.
 
 ## Project layout
 

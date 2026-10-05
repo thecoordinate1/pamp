@@ -1,8 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
-import { ArrowLeft, CheckCircle2, Clock, Minus, Plus, Sparkles, WifiOff } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clock, Minus, Plus, Smartphone, Sparkles, WifiOff } from 'lucide-react';
 import Sheet from './Sheet';
 import LocationCard from './LocationCard';
 import PassCarousel from './PassCarousel';
@@ -11,12 +11,14 @@ import { useAuth } from '../lib/authContext';
 import { sharedPassUrl } from '../lib/invite';
 import {
   keys,
+  useChargeOrder,
   useCreateOrder,
   useEventPrivate,
   useMyPasses,
   useMyPoints,
   useMyProfile,
   useMyReferral,
+  useOrderPayment,
   usePlatformSettings,
   useReclaimPass,
   useSharePass,
@@ -29,8 +31,23 @@ import { shareOrCopy } from '../lib/useShareLink';
 const PROVIDERS = [
   { id: 'mtn', name: 'MTN MoMo', dot: '#FFCB05' },
   { id: 'airtel', name: 'Airtel Money', dot: '#FF3B30' },
-  { id: 'card', name: 'Card', dot: '#A0A0A0' },
+  { id: 'zamtel', name: 'Zamtel Money', dot: '#2E7D32' },
 ];
+
+// What the held-order screen says at each step of paying.
+const PENDING_COPY = {
+  sending: { title: 'Sending the request…', body: 'Asking your mobile money provider to prompt your phone.' },
+  approve: {
+    title: 'Approve on your phone',
+    body: 'You should get a prompt now. Enter your PIN to pay. Your pass appears here as soon as it goes through.',
+  },
+  retry: { title: 'Could not send the request', body: 'Your order is held for a few minutes.' },
+  failed: { title: 'Payment not completed', body: 'Nothing was charged.' },
+  review: {
+    title: 'We need to check this payment',
+    body: 'Your payment and your order do not match, so no pass was issued. Contact PAMP support with your order number and we will sort it out.',
+  },
+};
 
 function Spinner() {
   return <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" aria-hidden="true" />;
@@ -67,7 +84,8 @@ export default function TicketModal({ event, isOpen, onClose }) {
   const { data: referral } = useMyReferral(user?.id);
 
   const createOrder = useCreateOrder();
-  const isProcessing = createOrder.isPending;
+  const chargeOrder = useChargeOrder();
+  const isProcessing = createOrder.isPending || chargeOrder.isPending;
 
   // Passes come from the database rather than this sheet's state, so they are
   // still here after a reload, on another phone, or with no signal at all.
@@ -85,6 +103,39 @@ export default function TicketModal({ event, isOpen, onClose }) {
     [allPasses, event?.id]
   );
   const summary = summarisePasses(myPasses);
+
+  // What Lenco says about the payment, whether it came back from the request or
+  // from polling while the customer approves on their phone.
+  const settle = useCallback(
+    (result) => {
+      if (result.state === 'paid') {
+        // New passes are added after existing ones, so open on the first new one.
+        setPage(buyingMore ? myPasses.length : 0);
+        setBuyingMore(false);
+        setPendingOrder(null);
+        setJustClaimed(true);
+        celebrate();
+      } else if (result.state === 'failed') {
+        setPendingOrder((o) => o && { ...o, phase: 'failed', message: result.message || 'The payment was not approved.' });
+      } else if (result.state === 'review') {
+        setPendingOrder((o) => o && { ...o, phase: 'review' });
+      } else {
+        setPendingOrder((o) => o && { ...o, phase: 'approve' });
+      }
+    },
+    [buyingMore, myPasses.length]
+  );
+
+  // The webhook usually confirms first, but polling covers one that is late.
+  const awaitingApproval = pendingOrder?.phase === 'approve';
+  const payment = useOrderPayment(pendingOrder?.id, {
+    enabled: isOpen && awaitingApproval,
+    eventId: event?.id,
+  });
+  useEffect(() => {
+    if (awaitingApproval && payment.data && payment.data.state !== 'pending') settle(payment.data);
+  }, [awaitingApproval, payment.data, settle]);
+
   const showingPasses = myPasses.length > 0 && !buyingMore && !pendingOrder;
   const claimedButUnseen = justClaimed && myPasses.length === 0 && !pendingOrder;
   // Holders are trusted with the exact address, so show it with their passes.
@@ -128,7 +179,7 @@ export default function TicketModal({ event, isOpen, onClose }) {
 
   const handlePay = async (e) => {
     e?.preventDefault();
-    if (!isFree && !paidInPoints && paymentProvider !== 'card' && !phone.trim()) {
+    if (!isFree && !paidInPoints && !phone.trim()) {
       setError('Enter your mobile money number.');
       return;
     }
@@ -141,22 +192,18 @@ export default function TicketModal({ event, isOpen, onClose }) {
         eventId: event.id,
         quantity,
         method: isFree ? 'free' : paymentProvider,
-        msisdn: paymentProvider === 'card' || paidInPoints ? null : phone,
+        msisdn: paidInPoints ? null : phone,
         // The whole balance is offered; the database uses only what the order
         // needs, so a stale quote can never under- or over-spend.
         points: pointsApplied ? points.balance : 0,
       });
 
       if (order.status === 'paid') {
-        // New passes are added after existing ones, so open on the first new one.
-        setPage(buyingMore ? myPasses.length : 0);
-        setBuyingMore(false);
-        setJustClaimed(true);
-        celebrate();
+        settle({ state: 'paid' });
       } else {
-        // Paid events wait on a provider to confirm. Until one is connected the
-        // order is real and held, but no pass is issued.
-        setPendingOrder({
+        // The order is held while Lenco asks the customer's phone to approve it.
+        // The pass is issued once the payment is confirmed.
+        await startCharge({
           id: order.id,
           quantity: order.quantity,
           total: ngweeToZmw(order.total_ngwee),
@@ -168,6 +215,22 @@ export default function TicketModal({ event, isOpen, onClose }) {
     } catch (err) {
       setError(err.message ?? 'Could not create that order. Try again.');
     }
+  };
+
+  // Asks Lenco to send the payment request, and shows how it went.
+  const startCharge = async (held) => {
+    setPendingOrder({ ...held, phase: 'sending', message: '' });
+    try {
+      settle(await chargeOrder.mutateAsync({ orderId: held.id, eventId: event.id }));
+    } catch (err) {
+      setPendingOrder((o) => o && { ...o, phase: 'retry', message: err.message });
+    }
+  };
+
+  // Back to the form to pay again. The held order frees itself when its time runs out.
+  const backToForm = (message = '') => {
+    setPendingOrder(null);
+    setError(message);
   };
 
   const notify = (passId, text) => setNotices((n) => ({ ...n, [passId]: text }));
@@ -405,24 +468,22 @@ export default function TicketModal({ event, isOpen, onClose }) {
                 </div>
               </fieldset>
 
-              {paymentProvider !== 'card' && (
-                <div>
-                  <label htmlFor={`${formId}-phone`} className="field-label">
-                    Mobile money number
-                  </label>
-                  <input
-                    id={`${formId}-phone`}
-                    type="tel"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    placeholder="097 123 4567"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="input-dark"
-                  />
-                  <p className="mt-2 text-[13px] text-text-muted">You'll get a prompt on your phone to approve.</p>
-                </div>
-              )}
+              <div>
+                <label htmlFor={`${formId}-phone`} className="field-label">
+                  Mobile money number
+                </label>
+                <input
+                  id={`${formId}-phone`}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="097 123 4567"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="input-dark"
+                />
+                <p className="mt-2 text-[13px] text-text-muted">You'll get a prompt on your phone to approve.</p>
+              </div>
             </>
           )}
 
@@ -437,13 +498,35 @@ export default function TicketModal({ event, isOpen, onClose }) {
       {pendingOrder && (
         <div className="text-center">
           <span className="mx-auto flex w-14 h-14 items-center justify-center rounded-full bg-amber/15 text-amber">
-            <Clock className="w-7 h-7" />
+            {pendingOrder.phase === 'approve' ? <Smartphone className="w-7 h-7" /> : <Clock className="w-7 h-7" />}
           </span>
-          <h3 className="mt-3 text-lg font-semibold text-white">Order held</h3>
-          <p className="mt-1 text-text-secondary">
-            Your order is reserved, but no mobile money provider is connected to PAMP
-            yet, so it cannot be charged.
+          <h3 className="mt-3 text-lg font-semibold text-white">{PENDING_COPY[pendingOrder.phase].title}</h3>
+          <p role="status" aria-live="polite" className="mt-1 text-text-secondary">
+            {pendingOrder.message || PENDING_COPY[pendingOrder.phase].body}
           </p>
+          {pendingOrder.phase === 'review' && (
+            <p className="mt-2 break-all font-mono text-xs text-text-muted select-all">{pendingOrder.id}</p>
+          )}
+          {pendingOrder.phase === 'approve' && (
+            <button type="button" onClick={() => payment.refetch()} disabled={payment.isFetching} className="btn-secondary mt-4">
+              {payment.isFetching ? 'Checking…' : "I've approved it"}
+            </button>
+          )}
+          {pendingOrder.phase === 'retry' && (
+            <div className="mt-4 flex justify-center gap-2">
+              <button type="button" onClick={() => startCharge(pendingOrder)} className="btn-secondary">
+                Try again
+              </button>
+              <button type="button" onClick={() => backToForm(pendingOrder.message)} className="btn-secondary">
+                Change number
+              </button>
+            </div>
+          )}
+          {pendingOrder.phase === 'failed' && (
+            <button type="button" onClick={() => backToForm(pendingOrder.message)} className="btn-secondary mt-4">
+              Try again
+            </button>
+          )}
           <dl className="card mt-6 space-y-2 p-4 text-left text-sm">
             <div className="flex justify-between">
               <dt className="text-text-muted">Passes</dt>
