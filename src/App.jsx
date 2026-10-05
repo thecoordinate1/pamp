@@ -6,6 +6,7 @@ import PartyCard from './components/PartyCard';
 import EventMap from './components/EventMap';
 import EventFilter from './components/EventFilter';
 import HostDashboard from './components/HostDashboard';
+import MeetPage from './components/MeetPage';
 import FacecardSection from './components/FacecardSection';
 import TicketModal from './components/TicketModal';
 import AttendeeNetworkingModal from './components/AttendeeNetworkingModal';
@@ -96,7 +97,7 @@ export default function App() {
   const createGuestRequest = useCreateGuestRequest(user?.id);
   const decideGuestRequest = useDecideGuestRequest();
 
-  // Page Navigation State: 'explore' | 'map' | 'host' | 'facecard'
+  // Page Navigation State: 'explore' | 'map' | 'host' | 'people' | 'facecard'
   const [activePage, setActivePage] = useState('explore');
   const [activeCategory, setActiveCategory] = useState('all');
   const [selectedCity, setSelectedCity] = useState('All Zambia');
@@ -504,6 +505,16 @@ export default function App() {
                 }
               />
             )}
+          </section>
+        )}
+
+        {activePage === 'people' && (
+          <section className="animate-fade-in pt-8 sm:pt-14">
+            <MeetPage
+              passEvents={passEvents}
+              onSignIn={() => setSignIn({ action: 'meet people at events', mode: 'signin' })}
+              onBrowse={() => setActivePage('explore')}
+            />
           </section>
         )}
 

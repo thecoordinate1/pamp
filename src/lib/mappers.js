@@ -112,7 +112,7 @@ export function rowToPrivateDetails(row) {
   };
 }
 
-const socialUrl = (platform, handle) => {
+export const socialUrl = (platform, handle) => {
   if (!platform || !handle) return null;
   const h = handle.replace(/^@/, '');
   switch (platform) {
