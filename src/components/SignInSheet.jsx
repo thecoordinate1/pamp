@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { MailCheck } from 'lucide-react';
 import Sheet from './Sheet';
+import PasswordInput from './PasswordInput';
 import { useAuth } from '../lib/authContext';
 import { inviteUrl } from '../lib/invite';
 
@@ -204,9 +205,8 @@ export default function SignInSheet({
           {mode !== 'forgot' && (
             <div>
               <label htmlFor="auth-password" className="field-label">Password</label>
-              <input
+              <PasswordInput
                 id="auth-password"
-                type="password"
                 autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); clearMessages(); }}

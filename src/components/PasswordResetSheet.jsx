@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Sheet from './Sheet';
+import PasswordInput from './PasswordInput';
 import { useAuth } from '../lib/authContext';
 
 const MIN_PASSWORD = 8;
@@ -50,9 +51,8 @@ export default function PasswordResetSheet() {
       <form id="password-reset-form" onSubmit={submit} className="space-y-4">
         <div>
           <label htmlFor="new-password" className="field-label">New password</label>
-          <input
+          <PasswordInput
             id="new-password"
-            type="password"
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -62,9 +62,8 @@ export default function PasswordResetSheet() {
         </div>
         <div>
           <label htmlFor="confirm-password" className="field-label">Type it again</label>
-          <input
+          <PasswordInput
             id="confirm-password"
-            type="password"
             autoComplete="new-password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
