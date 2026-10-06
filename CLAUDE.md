@@ -31,11 +31,15 @@ a file, and re-run `ListAgents` before every send.
 What is stable is the working directory. Your role is whichever row matches the
 directory you are running in:
 
-| Role | Directory | Branch | Owns | May push? |
-|---|---|---|---|---|
-| **Review / release** | `apps\pamp` | `main` | Reviewing diffs, `npm run check`, security review, pushing | **Yes — sole pusher** |
-| **Feature dev** | `apps\pamp-dev` | `dev` | `src/`, `supabase/`, tests | No |
-| **Marketing** | `apps\pamp-marketing` | `marketing` | Brand, content, `docs/marketing/`. Never `src/` or `supabase/` | No |
+| Chat | Role | Directory | Branch | Owns | May push? |
+|---|---|---|---|---|---|
+| **Base** | Review / release | `apps\pamp` | `main` | Reviewing diffs, `npm run check`, security review, pushing | **Yes — sole pusher** |
+| **Scout** | Feature dev | `apps\pamp-scout` | `dev` | `src/`, `supabase/`, tests | No |
+| **Echo** | Marketing | `apps\pamp-echo` | `marketing` | Brand, content, `docs/marketing/`. Never `src/` or `supabase/` | No |
+
+Say the chat name out loud — "Scout is on B1", "Echo has the launch posts" —
+and call yourself by it when you announce. The assigned name (`pamp-16`) is
+only an address for `SendMessage`, and only until the next restart.
 
 **On startup, every session must:**
 
@@ -71,7 +75,7 @@ any session sweeps up every other session's half-finished work. Each non-release
 session works in its own worktree on its own branch:
 
 ```
-git worktree add ../pamp-<role> -b <role>
+git worktree add ../pamp-<name> -b <branch>
 ```
 
 - Never `git commit -a`. `git add` explicit paths only.
