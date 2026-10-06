@@ -3,6 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { BarChart3, Camera, Check, Copy, LogOut, Share2, Sparkles } from 'lucide-react';
 import Sheet from './Sheet';
 import { Avatar, VerifiedBadge } from './Avatar';
+import PhotoPicker from './PhotoPicker';
 import { useAuth } from '../lib/authContext';
 import { inviteUrl } from '../lib/invite';
 import { ngweeToZmw } from '../lib/mappers';
@@ -85,7 +86,7 @@ function InviteCard({ userId }) {
 
 // The profile picture, and where the verified badge stands. The picture is the
 // facecard selfie, and changing it here sends it back to be checked.
-function PhotoCard({ userId, profile }) {
+function PhotoCard({ userId, profile, email }) {
   const setAvatar = useSetAvatar(userId);
   const { data: reviewedPath } = useMyPhotoReview(userId);
   const path = profile?.avatar_path ?? null;
@@ -105,10 +106,7 @@ function PhotoCard({ userId, profile }) {
     else status = 'Add a clear photo of your face. Once an admin checks it, you get the badge and can spend points.';
   }
 
-  const choose = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
+  const choose = async (file) => {
     setError('');
     try {
       await setAvatar.mutateAsync(file);
@@ -118,7 +116,7 @@ function PhotoCard({ userId, profile }) {
   };
 
   return (
-    <section aria-label="Profile picture" className="card mb-6 flex items-center gap-4 p-4">
+    <section aria-label="Profile picture" className="card mb-6 flex items-start gap-4 p-4">
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
@@ -131,24 +129,28 @@ function PhotoCard({ userId, profile }) {
           <Camera className="w-4 h-4" />
         </span>
       </button>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        capture="user"
-        className="sr-only"
-        tabIndex={-1}
-        onChange={choose}
-      />
       <div className="min-w-0 flex-1">
         <p className="inline-flex max-w-full items-center gap-1 font-semibold text-white">
           <span className="truncate">{profile?.display_name || 'Your profile'}</span>
           {verified && <VerifiedBadge />}
         </p>
         {profile?.username && <p className="text-[13px] text-text-muted truncate">@{profile.username}</p>}
+        {email && (
+          <p className="text-[13px] text-text-muted truncate" title="The email you sign in with">
+            {email}
+          </p>
+        )}
         <p className="mt-1 text-[13px] text-text-secondary">
           {setAvatar.isPending ? 'Saving your photo…' : status}
         </p>
+        <PhotoPicker
+          ref={inputRef}
+          onFile={choose}
+          disabled={setAvatar.isPending}
+          className="mt-3"
+          takeLabel="Take a photo"
+          chooseLabel="Choose from phone"
+        />
         {error && (
           <p role="alert" className="mt-1 text-[13px] text-red">
             {error}
@@ -341,7 +343,7 @@ export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigat
       subtitle="This is what other people at an event see."
       footer={footer}
     >
-      <PhotoCard userId={user?.id} profile={profile} />
+      <PhotoCard userId={user?.id} profile={profile} email={user?.email} />
       <RewardsCard userId={user?.id} verified={Boolean(profile?.identity_verified_at)} />
       <InviteCard userId={user?.id} />
       {isLoading ? (

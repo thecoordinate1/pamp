@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Camera, CheckCircle2, Clock, ExternalLink, MessageCircle, XCircle } from 'lucide-react';
 import LocationCard from './LocationCard';
+import PhotoPicker from './PhotoPicker';
 import { PersonName } from './Avatar';
 import { useAuth } from '../lib/authContext';
 import { formatEventDate } from '../lib/format';
@@ -57,6 +58,7 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
   const [selectedParty, setSelectedParty] = useState('');
   const [selfiePreview, setSelfiePreview] = useState(null);
   const [selfieFile, setSelfieFile] = useState(null);
+  const galleryRef = useRef(null);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   // null until edited: the field shows the profile name, which hosts see.
@@ -79,8 +81,7 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
   const currentPhoto = photoUrls?.get(profile?.avatar_path) ?? null;
   const shownPhoto = selfiePreview ?? currentPhoto;
 
-  const handleSelfieChange = (e) => {
-    const file = e.target.files[0];
+  const handleSelfieChange = (file) => {
     if (!file) return;
     setError('');
     // Keep the File itself: the preview is only for display, the upload needs this.
@@ -156,7 +157,12 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
         <div className="card max-w-2xl p-6 sm:p-10 animate-fade-in">
           <form onSubmit={handleSubmitRequest} className="space-y-6">
             <div className="flex flex-col items-center text-center">
-              <label className="relative cursor-pointer group" aria-label="Add a selfie">
+              <button
+                type="button"
+                onClick={() => galleryRef.current?.click()}
+                className="relative cursor-pointer group rounded-full"
+                aria-label={shownPhoto ? 'Change your photo' : 'Add a photo'}
+              >
                 <span
                   className={`flex w-28 h-28 items-center justify-center overflow-hidden rounded-full transition-colors duration-200 ${
                     shownPhoto
@@ -170,8 +176,8 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
                     <Camera className="w-7 h-7 text-text-secondary" />
                   )}
                 </span>
-                <input type="file" accept="image/jpeg,image/png,image/webp" capture="user" className="sr-only" onChange={handleSelfieChange} />
-              </label>
+              </button>
+              <PhotoPicker ref={galleryRef} onFile={handleSelfieChange} disabled={isSubmitting} className="mt-3 justify-center" />
               {selfiePreview ? (
                 <>
                   <p className="mt-3 text-sm text-text-secondary">This becomes your profile picture when you send.</p>
@@ -188,11 +194,11 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
                 </>
               ) : currentPhoto ? (
                 <p className="mt-3 text-sm text-text-secondary">
-                  Your profile picture goes with the request. Tap it to take a new one.
+                  Your profile picture goes with the request. Use the buttons to change it.
                 </p>
               ) : (
                 <p className="mt-3 text-sm text-text-secondary">
-                  Add a selfie. It becomes your profile picture: hosts see it, and other guests
+                  Add a photo of your face. It becomes your profile picture: hosts see it, and other guests
                   only at events where you choose to be listed.
                 </p>
               )}
