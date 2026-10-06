@@ -28,8 +28,8 @@ every time a session restarts** — a name you were messaged by an hour ago may
 belong to nobody now. Never treat a session name as durable, never record one in
 a file, and re-run `ListAgents` before every send.
 
-What is stable is the working directory. Your role is whichever row matches the
-directory you are running in:
+What is stable is the working directory. It decides **what a session may write
+to** — not what job it was given:
 
 | Chat | Role | Directory | Branch | Owns | May push? |
 |---|---|---|---|---|---|
@@ -43,10 +43,30 @@ only an address for `SendMessage`, and only until the next restart.
 
 **On startup, every session must:**
 
-1. Check which directory it is in — that is its role. Do not claim a different one.
+1. Check which directory it is in, and what job the user actually gave it.
 2. Run `ListAgents` to see who else is live right now.
-3. Announce itself: role, directory, and what it is working on.
+3. Announce itself: job, directory, and what it is working on.
 4. If another session is in the same directory, settle it with them or ask the user.
+
+### When your directory and your job disagree
+
+A chat is launched in a directory; it does not pick one. So a session can easily
+be doing Echo's work while sitting in Base's directory. **Being in `apps\pamp`
+does not make you Base.** Only the user naming a session the release session
+does that, and only that session ever sets `PAMP_RELEASE=1`.
+
+If the directory and the job disagree, do not adopt the directory's role. Say so
+plainly, keep working on the job the user gave you, and:
+
+- Do not commit, stage, or `git add` anything in that tree — its index belongs
+  to whoever is properly working there.
+- Do not run the DB suites from it.
+- Keep work outside the repo, or make repo changes in your own worktree and hand
+  them to the release session.
+- Ask the user to move the chat to the right directory.
+
+Doing someone else's work in their tree is how two sessions end up in one index.
+Announcing the mismatch costs one message and prevents it.
 
 ### Do not run the DB tests at the same time as another session
 
