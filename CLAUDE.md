@@ -21,18 +21,37 @@ Several Claude sessions work on PAMP at once. They share this repo but not each
 other's context: a session only learns a peer exists by calling `ListAgents`,
 and only hears from one that uses `SendMessage`. Coordination is explicit.
 
+### Your directory is your identity
+
+Session names (`pamp-c3`, `pamp-41`) are assigned, not chosen, and **they change
+every time a session restarts** — a name you were messaged by an hour ago may
+belong to nobody now. Never treat a session name as durable, never record one in
+a file, and re-run `ListAgents` before every send.
+
+What is stable is the working directory. Your role is whichever row matches the
+directory you are running in:
+
+| Role | Directory | Branch | Owns | May push? |
+|---|---|---|---|---|
+| **Review / release** | `apps\pamp` | `main` | Reviewing diffs, `npm run check`, security review, pushing | **Yes — sole pusher** |
+| **Feature dev** | `apps\pamp-dev` | `dev` | `src/`, `supabase/`, tests | No |
+| **Marketing** | `apps\pamp-marketing` | `marketing` | Brand, content, `docs/marketing/`. Never `src/` or `supabase/` | No |
+
 **On startup, every session must:**
 
-1. Run `ListAgents` to see who else is live.
-2. Claim one role below and announce it to the other sessions with
-   `SendMessage`, saying which role and which worktree it is in.
-3. If the role it wants is already claimed, pick another or ask the user.
+1. Check which directory it is in — that is its role. Do not claim a different one.
+2. Run `ListAgents` to see who else is live right now.
+3. Announce itself: role, directory, and what it is working on.
+4. If another session is in the same directory, settle it with them or ask the user.
 
-| Role | Owns | May push? |
-|---|---|---|
-| **Review / release** | Reviewing diffs, running `npm run check`, security review, merging and pushing | **Yes — sole pusher** |
-| **Feature dev** | `src/`, `supabase/`, tests | No |
-| **Marketing** | Brand, content, `docs/marketing/`. Never edits `src/` or `supabase/` | No |
+### Do not run the DB tests at the same time as another session
+
+The linked worktrees have `node_modules` junctioned to the main checkout's, so
+two sessions running `npm run test` together share pglite state and tests fail
+at random — different files each run, with others silently skipped. A red run
+under contention means nothing, so never judge a commit by one. Say so, take
+turns, and re-run. `npm run lint` and `npm run build` are safe to run
+concurrently. The real fix is a separate `npm install` in each worktree.
 
 ### Only one session pushes
 
