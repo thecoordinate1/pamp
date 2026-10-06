@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Camera, CheckCircle2, Clock, ExternalLink, MessageCircle, XCircle } from 'lucide-react';
 import LocationCard from './LocationCard';
 import PhotoPicker from './PhotoPicker';
@@ -58,7 +58,6 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
   const [selectedParty, setSelectedParty] = useState('');
   const [selfiePreview, setSelfiePreview] = useState(null);
   const [selfieFile, setSelfieFile] = useState(null);
-  const galleryRef = useRef(null);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   // null until edited: the field shows the profile name, which hosts see.
@@ -157,11 +156,12 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
         <div className="card max-w-2xl p-6 sm:p-10 animate-fade-in">
           <form onSubmit={handleSubmitRequest} className="space-y-6">
             <div className="flex flex-col items-center text-center">
-              <button
-                type="button"
-                onClick={() => galleryRef.current?.click()}
-                className="relative cursor-pointer group rounded-full"
-                aria-label={shownPhoto ? 'Change your photo' : 'Add a photo'}
+              <PhotoPicker
+                onFile={handleSelfieChange}
+                disabled={isSubmitting}
+                label={shownPhoto ? 'Change your photo' : 'Add a photo'}
+                align="center"
+                className="group"
               >
                 <span
                   className={`flex w-28 h-28 items-center justify-center overflow-hidden rounded-full transition-colors duration-200 ${
@@ -176,8 +176,7 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
                     <Camera className="w-7 h-7 text-text-secondary" />
                   )}
                 </span>
-              </button>
-              <PhotoPicker ref={galleryRef} onFile={handleSelfieChange} disabled={isSubmitting} className="mt-3 justify-center" />
+              </PhotoPicker>
               {selfiePreview ? (
                 <>
                   <p className="mt-3 text-sm text-text-secondary">This becomes your profile picture when you send.</p>
@@ -194,11 +193,11 @@ export default function FacecardSection({ parties, hostEvents, myRequests, hostR
                 </>
               ) : currentPhoto ? (
                 <p className="mt-3 text-sm text-text-secondary">
-                  Your profile picture goes with the request. Use the buttons to change it.
+                  Your profile picture goes with the request. Tap it to take or choose a new one.
                 </p>
               ) : (
                 <p className="mt-3 text-sm text-text-secondary">
-                  Add a photo of your face. It becomes your profile picture: hosts see it, and other guests
+                  Tap to add a photo of your face. It becomes your profile picture: hosts see it, and other guests
                   only at events where you choose to be listed.
                 </p>
               )}

@@ -1,19 +1,37 @@
-import { forwardRef, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Camera, Image as ImageIcon } from 'lucide-react';
 
 const ACCEPT = 'image/jpeg,image/png,image/webp';
 
-// Two ways to add a photo: the camera, or a picture already on the phone.
-// `capture` makes phones open the camera straight away, so only the first
-// input has it; the second opens the gallery and files.
+// A photo you tap to change. The tap opens a small menu: take a new photo with
+// the camera, or choose one already on the phone. `capture` makes phones open
+// the camera straight away, so only the camera input has it.
 //
-// The forwarded ref is the gallery input, so a caller can open it from
-// elsewhere, such as a tap on the current picture.
-const PhotoPicker = forwardRef(function PhotoPicker(
-  { onFile, disabled = false, className = '', takeLabel = 'Take a photo', chooseLabel = 'Choose from phone' },
-  galleryRef
-) {
+// `children` is what shows on the button, usually the current picture. `align`
+// centres the menu under a picture in the middle of the screen.
+export default function PhotoPicker({ onFile, disabled = false, label, children, className = '', align = 'start' }) {
+  const [open, setOpen] = useState(false);
+  const menuId = useId();
+  const wrapRef = useRef(null);
   const cameraRef = useRef(null);
+  const galleryRef = useRef(null);
+
+  // Closes on a tap anywhere else, or Escape.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointer = (e) => {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   const pick = (e) => {
     const file = e.target.files?.[0];
@@ -22,30 +40,58 @@ const PhotoPicker = forwardRef(function PhotoPicker(
     if (file) onFile(file);
   };
 
+  const choose = (ref) => {
+    setOpen(false);
+    ref.current?.click();
+  };
+
   return (
-    <div className={`flex flex-wrap gap-2 ${className}`}>
+    <div ref={wrapRef} className={`relative inline-block ${className}`}>
       <button
         type="button"
         disabled={disabled}
-        onClick={() => cameraRef.current?.click()}
-        className="btn-secondary h-9 min-h-9 px-3 text-sm"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+        className="relative rounded-full disabled:opacity-60"
       >
-        <Camera className="w-4 h-4" />
-        {takeLabel}
+        {children}
+        <span className="absolute -bottom-0.5 -right-0.5 flex w-7 h-7 items-center justify-center rounded-full bg-accent text-white">
+          <Camera className="w-4 h-4" />
+        </span>
       </button>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => galleryRef?.current?.click()}
-        className="btn-secondary h-9 min-h-9 px-3 text-sm"
-      >
-        <ImageIcon className="w-4 h-4" />
-        {chooseLabel}
-      </button>
+
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          className={`absolute top-full z-20 mt-2 w-52 ${align === 'center' ? 'left-1/2 -translate-x-1/2' : 'left-0'} overflow-hidden rounded-2xl border border-white/10 bg-surface-light py-1 shadow-xl`}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose(cameraRef)}
+            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-white hover:bg-white/8"
+          >
+            <Camera className="w-4 h-4 text-accent" />
+            Take a photo
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose(galleryRef)}
+            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-white hover:bg-white/8"
+          >
+            <ImageIcon className="w-4 h-4 text-accent" />
+            Choose from phone
+          </button>
+        </div>
+      )}
+
       <input ref={cameraRef} type="file" accept={ACCEPT} capture="user" className="sr-only" tabIndex={-1} onChange={pick} />
       <input ref={galleryRef} type="file" accept={ACCEPT} className="sr-only" tabIndex={-1} onChange={pick} />
     </div>
   );
-});
-
-export default PhotoPicker;
+}

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { BarChart3, Camera, Check, Copy, LogOut, Share2, Sparkles } from 'lucide-react';
+import { BarChart3, Check, Copy, LogOut, Share2, Sparkles } from 'lucide-react';
 import Sheet from './Sheet';
 import { Avatar, VerifiedBadge } from './Avatar';
 import PhotoPicker from './PhotoPicker';
@@ -91,7 +91,6 @@ function PhotoCard({ userId, profile, email }) {
   const { data: reviewedPath } = useMyPhotoReview(userId);
   const path = profile?.avatar_path ?? null;
   const { data: photoUrls } = usePhotoUrls([path]);
-  const inputRef = useRef(null);
   const [error, setError] = useState('');
 
   // identity_verified_at is missing until the migration that adds badges runs.
@@ -117,18 +116,14 @@ function PhotoCard({ userId, profile, email }) {
 
   return (
     <section aria-label="Profile picture" className="card mb-6 flex items-start gap-4 p-4">
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
+      <PhotoPicker
+        onFile={choose}
         disabled={setAvatar.isPending}
-        aria-label={path ? 'Change your profile picture' : 'Add a profile picture'}
-        className="relative shrink-0 rounded-full disabled:opacity-60"
+        label={path ? 'Change your profile picture' : 'Add a profile picture'}
+        className="shrink-0"
       >
         <Avatar src={photoUrls?.get(path)} name={profile?.display_name} className="w-20 h-20 text-2xl" />
-        <span className="absolute -bottom-0.5 -right-0.5 flex w-7 h-7 items-center justify-center rounded-full bg-accent text-white">
-          <Camera className="w-4 h-4" />
-        </span>
-      </button>
+      </PhotoPicker>
       <div className="min-w-0 flex-1">
         <p className="inline-flex max-w-full items-center gap-1 font-semibold text-white">
           <span className="truncate">{profile?.display_name || 'Your profile'}</span>
@@ -143,14 +138,6 @@ function PhotoCard({ userId, profile, email }) {
         <p className="mt-1 text-[13px] text-text-secondary">
           {setAvatar.isPending ? 'Saving your photo…' : status}
         </p>
-        <PhotoPicker
-          ref={inputRef}
-          onFile={choose}
-          disabled={setAvatar.isPending}
-          className="mt-3"
-          takeLabel="Take a photo"
-          chooseLabel="Choose from phone"
-        />
         {error && (
           <p role="alert" className="mt-1 text-[13px] text-red">
             {error}
