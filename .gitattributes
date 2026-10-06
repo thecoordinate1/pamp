@@ -1,0 +1,4 @@
+# Git hooks are shell scripts. Checked out with CRLF, `#!/bin/sh` becomes
+# `/bin/sh\r` and the hook fails to run — which would silently disable the
+# push gate rather than report an error. Keep them LF on every platform.
+.githooks/** text eol=lf

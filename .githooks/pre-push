@@ -1,0 +1,29 @@
+#!/bin/sh
+# Only the designated release session may push main.
+#
+# Set PAMP_RELEASE=1 in the ONE session you want to push from:
+#   export PAMP_RELEASE=1     (bash)
+#   $env:PAMP_RELEASE = "1"   (PowerShell)
+#
+# Every other session, agent or worktree is refused, so two sessions can never
+# race a push to main. Disable entirely with: git config --unset core.hooksPath
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      if [ "$PAMP_RELEASE" != "1" ]; then
+        echo "" >&2
+        echo "  BLOCKED: this session is not the release session." >&2
+        echo "" >&2
+        echo "  Pushing main is restricted so two agents cannot race." >&2
+        echo "  If this session should be the one that pushes, run:" >&2
+        echo "      export PAMP_RELEASE=1" >&2
+        echo "  and push again. Otherwise commit and let the release" >&2
+        echo "  session push." >&2
+        echo "" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+exit 0
