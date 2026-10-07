@@ -68,14 +68,31 @@ plainly, keep working on the job the user gave you, and:
 Doing someone else's work in their tree is how two sessions end up in one index.
 Announcing the mismatch costs one message and prevents it.
 
-### Do not run the DB tests at the same time as another session
+### A red test run on a busy machine is not evidence
 
-The linked worktrees have `node_modules` junctioned to the main checkout's, so
-two sessions running `npm run test` together share pglite state and tests fail
-at random — different files each run, with others silently skipped. A red run
-under contention means nothing, so never judge a commit by one. Say so, take
-turns, and re-run. `npm run lint` and `npm run build` are safe to run
-concurrently. The real fix is a separate `npm install` in each worktree.
+The pglite suites die when the machine is saturated, whatever is saturating it.
+The failure has a distinctive shape: **test FILES fail while zero individual
+tests fail**, and others are silently skipped — `5 failed (28)` with
+`252 passed | 24 skipped`. Assertions are not failing; vitest workers are being
+starved and killed. Different files are blamed each run, and every accused file
+passes on its own.
+
+Never judge a commit by one such run. Say what you saw, find out who else is
+working, and re-run. Three times now a commit has gone red and then clean on a
+re-run with nothing changed.
+
+**The cause is CPU and memory contention, not shared state.** An earlier version
+of this section blamed the junctioned `node_modules` and prescribed a separate
+`npm install` per worktree. That was wrong: a run died while the other session
+was running no tests at all — only repeated `vite build` and headless Chrome.
+Its own build went from ~18s to 3m25s in the same window, which is what
+saturation looks like from the other side. A separate `npm install` would not
+have helped.
+
+So `npm run lint` and `npm run build` are **not** safe to run alongside someone
+else's suite either — a build is heavy enough on its own. Before a run that a
+release decision depends on, ask the other live sessions for a clear window, and
+say when you are done so the next one can go.
 
 ### Only one session pushes
 
