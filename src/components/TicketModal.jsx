@@ -20,8 +20,10 @@ import {
   useMyReferral,
   useOrderPayment,
   usePlatformSettings,
+  usePullUnihairPoints,
   useReclaimPass,
   useSharePass,
+  useUnihairLink,
 } from '../lib/queries';
 import { ngweeToZmw, zmwToNgwee } from '../lib/mappers';
 import { summarisePasses } from '../lib/passes';
@@ -85,7 +87,8 @@ export default function TicketModal({ event, isOpen, onClose }) {
 
   const createOrder = useCreateOrder();
   const chargeOrder = useChargeOrder();
-  const isProcessing = createOrder.isPending || chargeOrder.isPending;
+  const pullUnihair = usePullUnihairPoints(user?.id);
+  const isProcessing = createOrder.isPending || chargeOrder.isPending || pullUnihair.isPending;
 
   // Passes come from the database rather than this sheet's state, so they are
   // still here after a reload, on another phone, or with no signal at all.
@@ -167,15 +170,23 @@ export default function TicketModal({ event, isOpen, onClose }) {
   const { data: points } = useMyPoints(wantsPoints ? user?.id : null);
   const { data: settings } = usePlatformSettings(wantsPoints);
   const verified = Boolean(profile?.identity_verified_at);
+  // Points in a linked UniHair account count too. Only spenders need them, so
+  // UniHair is only asked for verified profiles.
+  const { data: unihairLink } = useUnihairLink(wantsPoints && verified ? user?.id : null);
+  const pampPoints = points?.balance ?? 0;
+  const unihairPoints = unihairLink?.linked ? unihairLink.unihair ?? 0 : 0;
+  const allPoints = pampPoints + unihairPoints;
   const quote = quoteWithPoints({
     subtotalNgwee: zmwToNgwee(totalPrice),
-    balance: points?.balance ?? 0,
+    balance: allPoints,
     pointValueNgwee: points?.pointValueNgwee,
     settings,
   });
   // Waits for the fee settings, or the quote would leave the fee out.
   const pointsApplied = usePoints && verified && quote.points > 0 && Boolean(settings);
   const paidInPoints = pointsApplied && quote.total === 0;
+  // What PAMP is short by, moved from UniHair just before the order.
+  const fromUnihair = pointsApplied ? Math.max(0, quote.points - pampPoints) : 0;
 
   const handlePay = async (e) => {
     e?.preventDefault();
@@ -186,6 +197,11 @@ export default function TicketModal({ event, isOpen, onClose }) {
     setError('');
 
     try {
+      // UniHair points move into PAMP first, only as many as this order needs.
+      // They stay in PAMP after that, even if the order is not paid.
+      let pampBalance = pampPoints;
+      if (fromUnihair > 0) pampBalance = (await pullUnihair.mutateAsync(fromUnihair)).pamp;
+
       // The database sets the price, the fee and whether the order is paid, and
       // hands back an existing free pass rather than minting another.
       const order = await createOrder.mutateAsync({
@@ -195,7 +211,7 @@ export default function TicketModal({ event, isOpen, onClose }) {
         msisdn: paidInPoints ? null : phone,
         // The whole balance is offered; the database uses only what the order
         // needs, so a stale quote can never under- or over-spend.
-        points: pointsApplied ? points.balance : 0,
+        points: pointsApplied ? pampBalance : 0,
       });
 
       if (order.status === 'paid') {
@@ -398,15 +414,16 @@ export default function TicketModal({ event, isOpen, onClose }) {
             </div>
           </div>
 
-          {!isFree && points?.balance > 0 && (
+          {!isFree && allPoints > 0 && points && (
             <div className="rounded-2xl bg-white/5 px-4 py-3">
               <div className="flex items-center gap-3">
                 <Sparkles className="w-5 h-5 shrink-0 text-accent" />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-white">
-                    {points.balance.toLocaleString()} points
+                    {allPoints.toLocaleString()} points
                     <span className="font-normal text-text-muted">
-                      {' '}· worth {currency} {ngweeToZmw(points.balance * points.pointValueNgwee).toLocaleString()}
+                      {' '}· worth {currency} {ngweeToZmw(allPoints * points.pointValueNgwee).toLocaleString()}
+                      {unihairPoints > 0 && ` · ${unihairPoints.toLocaleString()} on UniHair`}
                     </span>
                   </p>
                   <p className="text-[13px] text-text-muted">
@@ -418,6 +435,11 @@ export default function TicketModal({ event, isOpen, onClose }) {
                           : `Uses all ${quote.points.toLocaleString()} and takes ${currency} ${ngweeToZmw(quote.discount)} off.`
                         : 'Use them to take money off this pass.'}
                   </p>
+                  {fromUnihair > 0 && (
+                    <p className="mt-1 text-[13px] text-text-secondary">
+                      {fromUnihair.toLocaleString()} of them move over from UniHair when you pay, and stay in PAMP.
+                    </p>
+                  )}
                 </div>
                 {verified && (
                   <button

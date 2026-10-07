@@ -99,6 +99,26 @@ Until the webhook is set up, payments still complete: the app's polling finds th
 
 `20261005000400_schedule_order_expiry.sql` schedules `expire_stale_orders()` every five minutes with `pg_cron`, which frees held places and gives back spent points. Enable the extension first under Database, Extensions in the Supabase dashboard; without it the migration only prints a notice. Check with `select * from cron.job;`.
 
+## UniHair points
+
+People can link their PAMP account to their UniHair account (unihair.shop, a separate app and Supabase project) so UniHair points count towards PAMP passes. A point is worth K0.10 in both.
+
+- **Linking.** In UniHair, Account → Link PAMP shows an 8-character code (XXXX-XXXX) that lasts five minutes. Typed into PAMP's profile, the `unihair-link` Edge Function hands it to UniHair's `pamp-bridge` function, which checks it and records the link on both sides. Being signed in to both apps within the code's lifetime is the proof that the accounts are one person; nothing is matched by email. UniHair throttles wrong codes.
+- **Moving points.** Each app spends only its own ledger. At a PAMP checkout that needs more points than PAMP holds, the shortfall is pulled: UniHair debits its ledger (refusing an overdraft) and only then does PAMP credit its own, under a ref both sides record. A pull with no answer is settled on the next visit by asking UniHair about that ref. Nothing can push points into PAMP, so nothing outside PAMP can create PAMP points. A pull is refused if the two apps value a point differently.
+- **Earned points only.** Only points earned by using UniHair (completed bookings, delivered orders, admin-confirmed no-shows) can move, never sign-up or referral bonuses, so throwaway UniHair accounts are worth nothing here. At most 2,000 points a day leave a UniHair account or reach a PAMP account, a PAMP account can link a different UniHair account at most once a week, and deleted or suspended UniHair accounts drop out.
+- **One way for now.** Points move UniHair → PAMP only. Spending PAMP points at UniHair is not built yet.
+
+Code: `supabase/functions/_shared/bridge.ts` (signing and the UniHair client), `unihair-link/`, and `20261007000100_unihair_points_link.sql`. UniHair's half lives in the UniHairShop repo.
+
+### Set up
+
+1. Apply `20261007000100_unihair_points_link.sql`, and UniHair's matching schema section.
+2. Make one random secret of at least 32 characters and set it as `POINTS_BRIDGE_SECRET` in **both** projects (Dashboard → Edge Functions → Secrets). For example, in PowerShell, which copies it to the clipboard without showing it:
+   ```powershell
+   $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b) | Set-Clipboard
+   ```
+3. Deploy `unihair-link` here and `pamp-bridge` in UniHair. Until the secret is set, both answer "not switched on yet" and the profile card stays hidden.
+
 ## CI
 
 `.github/workflows/ci.yml` runs `npm run check` on every pull request and push to `main`.

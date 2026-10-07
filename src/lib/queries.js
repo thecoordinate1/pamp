@@ -83,6 +83,7 @@ export const keys = {
   myPasses: (userId) => ['passes', userId],
   myReferral: (userId) => ['referral', userId],
   myPoints: (userId) => ['me', userId, 'points'],
+  unihair: (userId) => ['me', userId, 'unihair'],
 };
 
 export function useEvents() {
@@ -927,5 +928,74 @@ export function useResolvePaymentReview() {
       return Boolean(data);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'payments-to-review'] }),
+  });
+}
+
+// The unihair-link Edge Function: links this PAMP account to a UniHair account
+// with a code from UniHair, reports both balances, and moves UniHair points into
+// PAMP when a checkout needs them. Errors carry the function's code
+// (invalid_code, insufficient, not_configured, ...) and its message.
+async function callUnihairLink(body) {
+  const { data, error } = await supabase.functions.invoke('unihair-link', { body });
+  if (error) {
+    let payload = {};
+    try {
+      payload = await error.context.json();
+    } catch {
+      /* no body */
+    }
+    const err = new Error(payload.message || 'Could not reach UniHair. Try again.');
+    err.code = payload.error ?? 'unreachable';
+    throw err;
+  }
+  return data;
+}
+
+// { linked, name?, pamp, unihair } where unihair is null while UniHair cannot be
+// reached. Null when linking is not switched on, so nothing is shown.
+export function useUnihairLink(userId) {
+  return useQuery({
+    queryKey: keys.unihair(userId),
+    enabled: Boolean(userId),
+    staleTime: 30 * 1000,
+    retry: false,
+    queryFn: async () => {
+      try {
+        return await callUnihairLink({ action: 'status' });
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
+const afterUnihairChange = (qc, userId) =>
+  Promise.all([
+    qc.invalidateQueries({ queryKey: keys.unihair(userId) }),
+    qc.invalidateQueries({ queryKey: keys.myPoints(userId) }),
+  ]);
+
+export function useLinkUnihair(userId) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code) => callUnihairLink({ action: 'link', code }),
+    onSuccess: () => afterUnihairChange(qc, userId),
+  });
+}
+
+export function useUnlinkUnihair(userId) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => callUnihairLink({ action: 'unlink' }),
+    onSuccess: () => afterUnihairChange(qc, userId),
+  });
+}
+
+// Moves points from UniHair into PAMP. Answers { moved, pamp, unihair }.
+export function usePullUnihairPoints(userId) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (points) => callUnihairLink({ action: 'pull', points }),
+    onSuccess: () => afterUnihairChange(qc, userId),
   });
 }

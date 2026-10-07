@@ -4,6 +4,7 @@ import { BarChart3, Check, Copy, LogOut, Share2, Sparkles } from 'lucide-react';
 import Sheet from './Sheet';
 import { Avatar, VerifiedBadge } from './Avatar';
 import PhotoPicker from './PhotoPicker';
+import UnihairLinkCard from './UnihairLinkCard';
 import { useAuth } from '../lib/authContext';
 import { inviteUrl } from '../lib/invite';
 import { ngweeToZmw } from '../lib/mappers';
@@ -332,6 +333,7 @@ export default function ProfileSheet({ open, onClose, isAdmin = false, onNavigat
     >
       <PhotoCard userId={user?.id} profile={profile} email={user?.email} />
       <RewardsCard userId={user?.id} verified={Boolean(profile?.identity_verified_at)} />
+      <UnihairLinkCard userId={user?.id} />
       <InviteCard userId={user?.id} />
       {isLoading ? (
         <div className="space-y-4" aria-hidden="true">

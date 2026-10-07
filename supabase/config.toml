@@ -424,3 +424,9 @@ verify_jwt = false
 [functions.lenco-charge]
 enabled = true
 verify_jwt = true
+
+# Called by the signed-in app, so the gateway checks the user's JWT. Talks to
+# UniHair's pamp-bridge function, signed with POINTS_BRIDGE_SECRET.
+[functions.unihair-link]
+enabled = true
+verify_jwt = true
