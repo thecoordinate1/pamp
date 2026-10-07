@@ -26,4 +26,4 @@ supabase/.branches/
 Thumbs.db
 
 # MCP config (contains access token)
-.mcp.json
+.mcp.json*
