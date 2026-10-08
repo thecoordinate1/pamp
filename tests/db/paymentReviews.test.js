@@ -48,8 +48,8 @@ describe('the mobile money number on an order', () => {
     order = await pendingOrder(db, buyer, await makeEvent(db, host, { price: 5000 }));
   });
 
-  it('comes back to the buyer when they order', () => {
-    expect(order.msisdn).toBe('0971234567');
+  it('comes back to the buyer when they order, normalised', () => {
+    expect(order.msisdn).toBe('260971234567');
   });
 
   it('cannot be read by the event’s host, who still sees the money', async () => {
@@ -101,7 +101,7 @@ describe('payments to review', () => {
       amount: '52.50',
       order_status: 'expired',
       buyer_name: 'Late Payer',
-      buyer_msisdn: '0971234567',
+      buyer_msisdn: '260971234567',
       event_name: 'Rooftop',
     });
   });

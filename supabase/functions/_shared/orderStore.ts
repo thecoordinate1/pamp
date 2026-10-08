@@ -4,7 +4,7 @@ import type { OrderRow, OrderStore } from './lenco.ts';
 // Just the part of the supabase-js client used here.
 type Db = {
   from(table: string): any;
-  rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ error: { message: string } | null }>;
+  rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { message: string } | null }>;
 };
 
 export function createOrderStore(db: Db): OrderStore {
@@ -19,8 +19,10 @@ export function createOrderStore(db: Db): OrderStore {
       return data;
     },
     async markPaid(id, reference) {
-      const { error } = await db.rpc('mark_order_paid', { p_order: id, p_provider_reference: reference });
+      const { data, error } = await db.rpc('mark_order_paid', { p_order: id, p_provider_reference: reference });
       if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      return row?.status ?? 'paid';
     },
     async markFailed(id) {
       // Only a pending order can fail. Moving it also returns any points spent on

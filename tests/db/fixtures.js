@@ -11,16 +11,23 @@ export async function makeEvent(db, hostId, { price = 0, capacity = null, name =
   return rows[0].id;
 }
 
-// create_order as the given user, committed, returning the order row.
-export async function order(db, userId, eventId, quantity = 1, method = 'free') {
+// A different valid Zambian mobile number each call. Mobile money orders need a
+// real-looking number, and at most three may wait on any one number.
+let phones = 0;
+export const nextPhone = () => `097${String(++phones).padStart(7, '0')}`;
+
+// create_order as the given user, committed, returning the order row. Mobile
+// money orders get a fresh number unless one is given.
+export async function order(db, userId, eventId, quantity = 1, method = 'free', msisdn) {
+  const phone = msisdn ?? (['mtn', 'airtel', 'zamtel'].includes(method) ? nextPhone() : null);
   return asUser(
     db,
     userId,
     async (tx) =>
       (
         await tx.query(
-          'select * from public.create_order($1::uuid, $2::int, $3::public.payment_method)',
-          [eventId, quantity, method]
+          'select * from public.create_order($1::uuid, $2::int, $3::public.payment_method, $4)',
+          [eventId, quantity, method, phone]
         )
       ).rows[0],
     { commit: true }

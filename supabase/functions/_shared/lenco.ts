@@ -37,11 +37,16 @@ export type OrderRow = {
 
 // What the handlers need from the database. index.ts backs it with the service
 // role; tests pass a fake.
-export type ReviewReason = 'order_not_payable' | 'amount_mismatch' | 'reference_mismatch';
+// over_capacity is recorded by mark_order_paid itself, in the database, when a
+// payment lands for places that have since gone.
+export type ReviewReason = 'order_not_payable' | 'amount_mismatch' | 'reference_mismatch' | 'over_capacity';
 
 export type OrderStore = {
   getOrder(id: string): Promise<OrderRow | null>;
-  markPaid(id: string, reference: string): Promise<void>;
+  // The order's status afterwards: 'paid', or 'failed' when the payment came
+  // too late for places someone else has since taken (the database then lists
+  // it for a refund itself).
+  markPaid(id: string, reference: string): Promise<string>;
   markFailed(id: string): Promise<void>;
   // Records money a person has to sort out, for the admin page. Once per order
   // and reason, however many times the webhook and polls find it.
@@ -272,7 +277,11 @@ export async function settleCollection(
     return review('amount_mismatch');
   }
 
-  await store.markPaid(order.id, `lenco:${collection.lencoReference ?? collection.id}`);
+  const status = await store.markPaid(order.id, `lenco:${collection.lencoReference ?? collection.id}`);
+  if (status !== 'paid') {
+    console.error('paid, but the places had gone', order.id, collection.lencoReference);
+    return { state: 'review', message: 'over_capacity' };
+  }
   return { state: 'paid' };
 }
 

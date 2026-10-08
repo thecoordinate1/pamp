@@ -17,7 +17,7 @@ const collection: Collection = {
 const setup = ({ row = order as OrderRow | null, found = collection as Collection | null } = {}) => {
   const store = {
     getOrder: vi.fn(async () => row),
-    markPaid: vi.fn(async () => {}),
+    markPaid: vi.fn(async () => 'paid'),
     markFailed: vi.fn(async () => {}),
     flagReview: vi.fn(async () => {}),
   } satisfies OrderStore;

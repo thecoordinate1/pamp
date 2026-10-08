@@ -91,9 +91,14 @@ Until the webhook is set up, payments still complete: the app's polling finds th
 
 ### Known gaps
 
-- If a customer approves after their order's hold has run out, or Lenco reports a different amount or reference, no pass is issued. The case is recorded in `payment_reviews` and listed on the admin page under "Payments to check", with the buyer, their number and Lenco's reference. Refund it in the Lenco dashboard, then mark it dealt with.
+- If Lenco reports a different amount or reference, no pass is issued. The case is recorded in `payment_reviews` and listed on the admin page under "Payments to check", with the buyer, their number and Lenco's reference. Refund it in the Lenco dashboard, then mark it dealt with.
+- A payment that arrives after the order's hold ran out still gets its passes if the places are free. If someone else has taken them since, the order fails (returning any points) and is listed under "Payments to check" as "Paid after the event had filled up", to refund.
 - Mobile money accounts that Lenco makes verify by one-time PIN are not handled. Lenco's current docs list only `pending`, `successful`, `failed` and `pay-offline`, with no way to submit a PIN.
 - Card payments.
+
+### Places and prompts
+
+An unpaid order holds its places until its hold runs out (`places_taken()` counts passes plus orders still being paid for), and `mark_order_paid` checks again under the event's lock when the money lands, so a capped event never sells more passes than it has. A mobile money order needs a valid Zambian number, stored as `260XXXXXXXXX`, and at most three payment prompts can wait on one number, and five on one buyer, so nobody can flood a phone with prompts.
 
 ### Expiring unpaid orders
 

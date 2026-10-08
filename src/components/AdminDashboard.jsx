@@ -69,6 +69,7 @@ const REVIEW_REASON = {
   order_not_payable: 'Paid after the order expired or was cancelled',
   amount_mismatch: 'Paid a different amount from the order',
   reference_mismatch: 'Payment reference does not match the order',
+  over_capacity: 'Paid after the event had filled up',
 };
 
 // Money Lenco collected that did not fit its order, so no pass was issued.

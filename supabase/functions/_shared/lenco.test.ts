@@ -143,7 +143,7 @@ describe('settleCollection', () => {
   });
   const makeStore = () => ({
     getOrder: vi.fn(async () => order),
-    markPaid: vi.fn(async () => {}),
+    markPaid: vi.fn(async () => 'paid'),
     markFailed: vi.fn(async () => {}),
     flagReview: vi.fn(async () => {}),
   }) satisfies OrderStore;
@@ -153,6 +153,14 @@ describe('settleCollection', () => {
     const store = makeStore();
     expect(await settleCollection(order, col(), store)).toEqual({ state: 'paid' });
     expect(store.markPaid).toHaveBeenCalledWith(ORDER, 'lenco:240730008');
+  });
+
+  it('reports a payment whose places had gone as needing review', async () => {
+    const err = quiet();
+    const store = makeStore();
+    store.markPaid.mockResolvedValueOnce('failed');
+    expect(await settleCollection(order, col(), store)).toEqual({ state: 'review', message: 'over_capacity' });
+    err.mockRestore();
   });
 
   it('does not pay twice', async () => {
